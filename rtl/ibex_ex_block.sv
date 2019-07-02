@@ -76,6 +76,11 @@ module ibex_ex_block #(
     At synthesis time, all the combinational and sequential logic
     from the multdiv_i module are eliminated
   */
+
+  `ifdef QUARTUS
+    generate
+  `endif
+
   if (RV32M) begin : gen_multdiv_m
     assign multdiv_en_sel     = MULT_TYPE ? div_en_i : mult_en_i | div_en_i;
     assign multdiv_en         = mult_en_i | div_en_i;
@@ -83,6 +88,10 @@ module ibex_ex_block #(
     assign multdiv_en_sel     = 1'b0;
     assign multdiv_en         = 1'b0;
   end
+
+  `ifdef QUARTUS
+    endgenerate
+  `endif
 
   assign regfile_wdata_ex_o = multdiv_en ? multdiv_result : alu_result;
 
@@ -111,6 +120,10 @@ module ibex_ex_block #(
   ////////////////
   // Multiplier //
   ////////////////
+
+  `ifdef QUARTUS
+    generate
+  `endif
 
   if (!MULT_TYPE) begin : gen_multdiv_slow
     ibex_multdiv_slow multdiv_i (
@@ -149,6 +162,10 @@ module ibex_ex_block #(
         .multdiv_result_o   ( multdiv_result        )
     );
   end
+
+  `ifdef QUARTUS
+    endgenerate
+  `endif
 
   always_comb begin
     unique case (1'b1)
