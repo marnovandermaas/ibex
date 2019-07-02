@@ -131,16 +131,31 @@ module ibex_register_file_latch #(
     assign unused_strobe = waddr_onehot_a[0]; // this is never read from in this case
     assign err_o = 1'b0;
   end
-
-  // Individual clock gating (if integrated clock-gating cells are available)
-  for (genvar x = 1; x < NUM_WORDS; x++) begin : gen_cg_word_iter
-    prim_clock_gating cg_i (
-        .clk_i     ( clk_int           ),
-        .en_i      ( waddr_onehot_a[x] ),
-        .test_en_i ( test_en_i         ),
-        .clk_o     ( mem_clocks[x]     )
-    );
-  end
+  //////////////////////////////////////////////////////////////////////////
+  // WRITE: Clock gating (if integrated clock-gating cells are available) //
+  //////////////////////////////////////////////////////////////////////////
+  `ifdef QUARTUS
+    generate
+      genvar x;
+      for (x = 1; x < NUM_WORDS; x++) begin : gen_cg_word_iter
+        prim_clock_gating cg_i (
+            .clk_i     ( clk_int           ),
+            .en_i      ( waddr_onehot_a[x] ),
+            .test_en_i ( test_en_i         ),
+            .clk_o     ( mem_clocks[x]     )
+        );
+      end
+    endgenerate
+  `else
+    for (genvar x = 1; x < NUM_WORDS; x++) begin : gen_cg_word_iter
+      prim_clock_gating cg_i (
+          .clk_i     ( clk_int           ),
+          .en_i      ( waddr_onehot_a[x] ),
+          .test_en_i ( test_en_i         ),
+          .clk_o     ( mem_clocks[x]     )
+      );
+    end
+  `endif
 
   // Actual write operation:
   // Generate the sequential process for the NUM_WORDS words of the memory.

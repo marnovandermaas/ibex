@@ -73,11 +73,19 @@ module ibex_ex_block #(
     At synthesis time, all the combinational and sequential logic
     from the multdiv_i module are eliminated
   */
+  `ifdef QUARTUS
+    generate
+  `endif
+
   if (RV32M != RV32MNone) begin : gen_multdiv_m
     assign multdiv_sel = mult_sel_i | div_sel_i;
   end else begin : gen_multdiv_no_m
     assign multdiv_sel = 1'b0;
   end
+
+  `ifdef QUARTUS
+    endgenerate
+  `endif
 
   // Intermediate Value Register Mux
   assign imd_val_d_o[0] = multdiv_sel ? multdiv_imd_val_d[0] : {2'b0, alu_imd_val_d[0]};
@@ -137,6 +145,10 @@ module ibex_ex_block #(
   // Multiplier //
   ////////////////
 
+  `ifdef QUARTUS
+    generate
+  `endif
+
   if (RV32M == RV32MSlow) begin : gen_multdiv_slow
     ibex_multdiv_slow multdiv_i (
       .clk_i             (clk_i),
@@ -190,6 +202,10 @@ module ibex_ex_block #(
       .multdiv_result_o  (multdiv_result)
     );
   end
+
+  `ifdef QUARTUS
+    endgenerate
+  `endif
 
   // Multiplier/divider may require multiple cycles. The ALU output is valid in the same cycle
   // unless the intermediate result register is being written (which indicates this isn't the
