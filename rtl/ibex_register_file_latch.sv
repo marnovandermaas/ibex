@@ -136,25 +136,20 @@ module ibex_register_file_latch #(
   //////////////////////////////////////////////////////////////////////////
   `ifdef QUARTUS
     generate
-      genvar x;
-      for (x = 1; x < NUM_WORDS; x++) begin : gen_cg_word_iter
-        prim_clock_gating cg_i (
-            .clk_i     ( clk_int           ),
-            .en_i      ( waddr_onehot_a[x] ),
-            .test_en_i ( test_en_i         ),
-            .clk_o     ( mem_clocks[x]     )
-        );
-      end
+  `endif
+
+  genvar x;
+  for (x = 1; x < NUM_WORDS; x++) begin : gen_cg_word_iter
+    prim_clock_gating cg_i (
+        .clk_i     ( clk_int           ),
+        .en_i      ( waddr_onehot_a[x] ),
+        .test_en_i ( test_en_i         ),
+        .clk_o     ( mem_clocks[x]     )
+    );
+  end
+
+  `ifdef QUARTUS
     endgenerate
-  `else
-    for (genvar x = 1; x < NUM_WORDS; x++) begin : gen_cg_word_iter
-      prim_clock_gating cg_i (
-          .clk_i     ( clk_int           ),
-          .en_i      ( waddr_onehot_a[x] ),
-          .test_en_i ( test_en_i         ),
-          .clk_o     ( mem_clocks[x]     )
-      );
-    end
   `endif
 
   // Actual write operation:
