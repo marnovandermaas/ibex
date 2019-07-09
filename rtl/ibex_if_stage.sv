@@ -40,6 +40,14 @@ module ibex_if_stage #(
     input  logic [31:0]               boot_addr_i,              // also used for mtvec
     input  logic                      req_i,                    // instruction request control
 
+`ifdef DII
+    input logic [31:0]                dii_insn,
+    input logic [15:0]                dii_time,
+    input logic [7:0]                 dii_cmd,
+    output logic                      dii_ready,
+    input logic                       dii_valid,
+`endif
+
     // instruction cache interface
     output logic                      instr_req_o,
     output logic [31:0]               instr_addr_o,
@@ -239,9 +247,22 @@ module ibex_if_stage #(
       illegal_c_insn_id_o        <= 1'b0;
       pc_id_o                    <= '0;
     end else begin
+      // TODO this needs to be redone
       if (if_valid_o) begin
+
+        // TODO implement direct instruction injection
+        `ifdef DII
+        // initially just add instruction injection
+        // TODO add in timing stuff
+        instr_valid_id_o         <= dii_valid;
+        instr_rdata_id_o         <= dii_cmd > 'b0 ? dii_insn
+                                                  : instr_decompressed;
+        dii_ready                <= req_i;
+        `else
         instr_valid_id_o         <= 1'b1;
         instr_rdata_id_o         <= instr_decompressed;
+        `endif
+
         instr_rdata_c_id_o       <= fetch_rdata[15:0];
         instr_is_compressed_id_o <= instr_is_compressed_int;
         illegal_c_insn_id_o      <= illegal_c_insn;
