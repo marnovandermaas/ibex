@@ -117,6 +117,7 @@ module ibex_core #(
 
   // IF/ID signals
   logic        instr_valid_id;
+  logic        instr_new_id;
   logic [31:0] instr_rdata_id;         // Instruction sampled inside IF stage
   logic [15:0] instr_rdata_c_id;       // Compressed instruction sampled inside IF stage
   logic        instr_is_compressed_id;
@@ -125,7 +126,7 @@ module ibex_core #(
   logic [31:0] pc_if;                  // Program counter in IF stage
   logic [31:0] pc_id;                  // Program counter in ID stage
 
-  logic        clear_instr_valid;
+  logic        instr_valid_clear;
   logic        pc_set;
   pc_sel_e     pc_mux_id;              // Mux selector for next PC
   exc_pc_sel_e exc_pc_mux_id;          // Mux selector for exception PC
@@ -168,9 +169,6 @@ module ibex_core #(
   logic [31:0] multdiv_operand_b_ex;
 
   // CSR control
-  logic        csr_access_ex;
-  csr_op_e     csr_op_ex;
-
   logic        csr_access;
   csr_op_e     csr_op;
   csr_num_e    csr_addr;
@@ -192,7 +190,7 @@ module ibex_core #(
   // stall control
   logic        halt_if;
   logic        id_ready;
-  logic        ex_ready;
+  logic        ex_valid;
 
   logic        if_valid;
   logic        id_valid;
@@ -329,6 +327,7 @@ module ibex_core #(
 
       // outputs to ID stage
       .instr_valid_id_o         ( instr_valid_id         ),
+      .instr_new_id_o           ( instr_new_id           ),
       .instr_rdata_id_o         ( instr_rdata_id         ),
       .instr_rdata_c_id_o       ( instr_rdata_c_id       ),
       .instr_is_compressed_id_o ( instr_is_compressed_id ),
@@ -337,7 +336,7 @@ module ibex_core #(
       .pc_id_o                  ( pc_id                  ),
 
       // control signals
-      .clear_instr_valid_i      ( clear_instr_valid      ),
+      .instr_valid_clear_i      ( instr_valid_clear      ),
       .pc_set_i                 ( pc_set                 ),
       .pc_mux_i                 ( pc_mux_id              ),
       .exc_pc_mux_i             ( exc_pc_mux_id          ),
@@ -381,18 +380,19 @@ module ibex_core #(
       .is_decoding_o                ( is_decoding            ),
       .illegal_insn_o               ( illegal_insn_id        ),
 
-      // Interface to instruction memory
+      // from/to IF-ID pipeline register
       .instr_valid_i                ( instr_valid_id         ),
+      .instr_new_i                  ( instr_new_id           ),
       .instr_rdata_i                ( instr_rdata_id         ),
       .instr_rdata_c_i              ( instr_rdata_c_id       ),
       .instr_is_compressed_i        ( instr_is_compressed_id ),
-      .instr_req_o                  ( instr_req_int          ),
 
       // Jumps and branches
       .branch_decision_i            ( branch_decision        ),
 
       // IF and ID control signals
-      .clear_instr_valid_o          ( clear_instr_valid      ),
+      .instr_valid_clear_o          ( instr_valid_clear      ),
+      .instr_req_o                  ( instr_req_int          ),
       .pc_set_o                     ( pc_set                 ),
       .pc_mux_o                     ( pc_mux_id              ),
       .exc_pc_mux_o                 ( exc_pc_mux_id          ),
@@ -406,7 +406,8 @@ module ibex_core #(
       .halt_if_o                    ( halt_if                ),
 
       .id_ready_o                   ( id_ready               ),
-      .ex_ready_i                   ( ex_ready               ),
+      .ex_valid_i                   ( ex_valid               ),
+      .lsu_valid_i                  ( data_valid_lsu         ),
 
       .id_valid_o                   ( id_valid               ),
 
@@ -422,8 +423,8 @@ module ibex_core #(
       .multdiv_operand_b_ex_o       ( multdiv_operand_b_ex   ),
 
       // CSR ID/EX
-      .csr_access_ex_o              ( csr_access_ex          ),
-      .csr_op_ex_o                  ( csr_op_ex              ),
+      .csr_access_o                 ( csr_access             ),
+      .csr_op_o                     ( csr_op                 ),
       .csr_save_if_o                ( csr_save_if            ), // control signal to save pc
       .csr_save_id_o                ( csr_save_id            ), // control signal to save pc
       .csr_restore_mret_id_o        ( csr_restore_mret_id    ), // control signal to restore pc
@@ -485,31 +486,30 @@ module ibex_core #(
   ibex_ex_block #(
       .RV32M ( RV32M )
   ) ex_block_i (
-      .clk_i                      ( clk                   ),
-      .rst_ni                     ( rst_ni                ),
-      // Alu signals from ID stage
-      //TODO: hot encoding
-      .alu_operator_i             ( alu_operator_ex       ),
-      .multdiv_operator_i         ( multdiv_operator_ex   ),
-      .alu_operand_a_i            ( alu_operand_a_ex      ),
-      .alu_operand_b_i            ( alu_operand_b_ex      ),
+      .clk_i                      ( clk                    ),
+      .rst_ni                     ( rst_ni                 ),
 
-      // Multipler
-      .mult_en_i                  ( mult_en_ex            ),
-      .div_en_i                   ( div_en_ex             ),
-      .multdiv_signed_mode_i      ( multdiv_signed_mode_ex),
-      .multdiv_operand_a_i        ( multdiv_operand_a_ex  ),
-      .multdiv_operand_b_i        ( multdiv_operand_b_ex  ),
-      .alu_adder_result_ex_o      ( alu_adder_result_ex   ), // from ALU to LSU
-      .regfile_wdata_ex_o         ( regfile_wdata_ex      ),
+      // ALU signal from ID stage
+      .alu_operator_i             ( alu_operator_ex        ),
+      .alu_operand_a_i            ( alu_operand_a_ex       ),
+      .alu_operand_b_i            ( alu_operand_b_ex       ),
 
-      // To IF: Jump and branch target and decision
-      .jump_target_o              ( jump_target_ex        ),
-      .branch_decision_o          ( branch_decision       ),
+      // Multipler/Divider signal from ID stage
+      .multdiv_operator_i         ( multdiv_operator_ex    ),
+      .mult_en_i                  ( mult_en_ex             ),
+      .div_en_i                   ( div_en_ex              ),
+      .multdiv_signed_mode_i      ( multdiv_signed_mode_ex ),
+      .multdiv_operand_a_i        ( multdiv_operand_a_ex   ),
+      .multdiv_operand_b_i        ( multdiv_operand_b_ex   ),
 
-      .lsu_en_i                   ( data_req_ex           ),
-      .lsu_ready_ex_i             ( data_valid_lsu        ),
-      .ex_ready_o                 ( ex_ready              )
+      // Outputs
+      .alu_adder_result_ex_o      ( alu_adder_result_ex    ), // to LSU
+      .regfile_wdata_ex_o         ( regfile_wdata_ex       ), // to ID
+
+      .jump_target_o              ( jump_target_ex         ), // to IF
+      .branch_decision_o          ( branch_decision        ), // to ID
+
+      .ex_valid_o                 ( ex_valid               )
   );
 
   /////////////////////
@@ -562,10 +562,8 @@ module ibex_core #(
   // CSRs (Control and Status Registers) //
   /////////////////////////////////////////
 
-  assign csr_access = csr_access_ex;
   assign csr_wdata  = alu_operand_a_ex;
-  assign csr_op     = csr_op_ex;
-  assign csr_addr   = csr_num_e'(csr_access_ex ? alu_operand_b_ex[11:0] : 12'b0);
+  assign csr_addr   = csr_num_e'(csr_access ? alu_operand_b_ex[11:0] : 12'b0);
 
   assign perf_load  = data_req_o & data_gnt_i & (~data_we_o);
   assign perf_store = data_req_o & data_gnt_i & data_we_o;
@@ -778,7 +776,7 @@ module ibex_core #(
       .cluster_id_i     ( cluster_id_i                         ),
 
       .pc_i             ( id_stage_i.pc_id_i                   ),
-      .instr_i          ( id_stage_i.instr                     ),
+      .instr_i          ( id_stage_i.instr_rdata_i             ),
       .compressed_i     ( id_stage_i.instr_is_compressed_i     ),
       .id_valid_i       ( id_stage_i.id_valid_o                ),
       .is_decoding_i    ( id_stage_i.is_decoding_o             ),
@@ -795,9 +793,9 @@ module ibex_core #(
 
       .lsu_value_i      ( data_wdata_ex                        ),
 
-      .ex_reg_addr_i    ( id_stage_i.regfile_waddr_mux         ),
-      .ex_reg_we_i      ( id_stage_i.regfile_we_mux            ),
-      .ex_reg_wdata_i   ( id_stage_i.regfile_wdata_mux         ),
+      .ex_reg_addr_i    ( id_stage_i.regfile_waddr             ),
+      .ex_reg_we_i      ( id_stage_i.regfile_we                ),
+      .ex_reg_wdata_i   ( id_stage_i.regfile_wdata             ),
       .data_valid_lsu_i ( data_valid_lsu                       ),
       .ex_data_addr_i   ( data_addr_o                          ),
       .ex_data_req_i    ( data_req_o                           ),
