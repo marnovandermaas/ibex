@@ -22,6 +22,10 @@ The Ibex user manual can be
 [read online at ReadTheDocs](https://ibex-core.readthedocs.io/en/latest/). It is also contained in
 the `doc` folder of this repository.
 
+This version of the Ibex core has been modified slightly in order to allow it to compile in quartus.
+In order to compile and build with quartus, the QUARTUS macro must be defined in the project
+settings.
+
 ## Contributing
 
 We highly appreciate community contributions. To ease our work of reviewing your contributions,
