@@ -35,6 +35,14 @@ module ibex_if_stage import ibex_pkg::*; #(
   input  logic [31:0]                  boot_addr_i,              // also used for mtvec
   input  logic                         req_i,                    // instruction request control
 
+`ifdef DII
+  input logic [31:0]                dii_insn,
+  input logic [15:0]                dii_time,
+  input logic [7:0]                 dii_cmd,
+  output logic                      dii_ready,
+  input logic                       dii_valid,
+`endif
+
   // instruction cache interface
   output logic                        instr_req_o,
   output logic [31:0]                 instr_addr_o,
