@@ -140,15 +140,6 @@ module ibex_core import ibex_pkg::*; #(
   output logic                         rvfi_ext_debug_req,
   output logic [63:0]                  rvfi_ext_mcycle,
 `endif
-
-`ifdef DII
-  input logic [31:0]  dii_insn,
-  input logic [15:0]  dii_time,
-  input logic [7:0]   dii_cmd,
-  output logic        dii_ready,
-  input logic         dii_valid,
-`endif
-
   // CPU Control Signals
   // SEC_CM: FETCH.CTRL.LC_GATED
   input  fetch_enable_t                fetch_enable_i,
@@ -398,14 +389,6 @@ module ibex_core import ibex_pkg::*; #(
 
     .boot_addr_i(boot_addr_i),
     .req_i      (instr_req_gated),  // instruction request control
-
-`ifdef DII
-    .dii_insn (dii_insn),
-    .dii_time (dii_time),
-    .dii_cmd  (dii_cmd),
-    .dii_ready(dii_ready),
-    .dii_valid(dii_valid),
-`endif
 
     // instruction cache interface
     .instr_req_o       (instr_req_o),

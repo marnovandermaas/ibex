@@ -35,14 +35,6 @@ module ibex_if_stage import ibex_pkg::*; #(
   input  logic [31:0]                  boot_addr_i,              // also used for mtvec
   input  logic                         req_i,                    // instruction request control
 
-`ifdef DII
-  input logic [31:0]                dii_insn,
-  input logic [15:0]                dii_time,
-  input logic [7:0]                 dii_cmd,
-  output logic                      dii_ready,
-  input logic                       dii_valid,
-`endif
-
   // instruction cache interface
   output logic                        instr_req_o,
   output logic [31:0]                 instr_addr_o,
@@ -609,6 +601,7 @@ module ibex_if_stage import ibex_pkg::*; #(
 
     assign instr_skid_en = predict_branch_taken & ~pc_set_i & ~id_in_ready_i & ~instr_skid_valid_q;
 
+<<<<<<< HEAD
     assign instr_skid_valid_d = (instr_skid_valid_q & ~id_in_ready_i & ~stall_dummy_instr) |
                                 instr_skid_en;
 
@@ -617,6 +610,29 @@ module ibex_if_stage import ibex_pkg::*; #(
         instr_skid_valid_q <= 1'b0;
       end else begin
         instr_skid_valid_q <= instr_skid_valid_d;
+=======
+  // IF-ID pipeline registers, frozen when the ID stage is stalled
+  always_ff @(posedge clk_i or negedge rst_ni) begin : if_id_pipeline_regs
+    if (!rst_ni) begin
+      instr_new_id_o             <= 1'b0;
+      instr_valid_id_o           <= 1'b0;
+      instr_rdata_id_o           <= '0;
+      instr_rdata_c_id_o         <= '0;
+      instr_is_compressed_id_o   <= 1'b0;
+      illegal_c_insn_id_o        <= 1'b0;
+      pc_id_o                    <= '0;
+    end else begin
+      instr_new_id_o             <= if_valid_o;
+      if (if_valid_o) begin
+        instr_valid_id_o         <= 1'b1;
+        instr_rdata_id_o         <= instr_decompressed;
+        instr_rdata_c_id_o       <= fetch_rdata[15:0];
+        instr_is_compressed_id_o <= instr_is_compressed_int;
+        illegal_c_insn_id_o      <= illegal_c_insn;
+        pc_id_o                  <= pc_if_o;
+      end else if (instr_valid_clear_i) begin
+        instr_valid_id_o         <= 1'b0;
+>>>>>>> Remove initial DII implementation
       end
     end
 
