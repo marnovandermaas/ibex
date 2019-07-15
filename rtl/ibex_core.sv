@@ -100,6 +100,10 @@ module ibex_core #(
     output logic [31:0] rvfi_mem_wdata,
 `endif
 
+`ifdef DII
+    output logic        perf_imiss_o,
+`endif
+
     // CPU Control Signals
     input  logic        fetch_enable_i
 
@@ -252,6 +256,10 @@ module ibex_core #(
   logic [31:0] rvfi_mem_wdata_q;
   logic [31:0] rvfi_mem_addr_d;
   logic [31:0] rvfi_mem_addr_q;
+`endif
+
+`ifdef DII
+  assign perf_imiss_o = perf_imiss;
 `endif
 
   //////////////////////
