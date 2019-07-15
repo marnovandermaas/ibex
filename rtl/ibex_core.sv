@@ -140,6 +140,11 @@ module ibex_core import ibex_pkg::*; #(
   output logic                         rvfi_ext_debug_req,
   output logic [63:0]                  rvfi_ext_mcycle,
 `endif
+
+`ifdef DII
+    output logic        perf_imiss_o,
+`endif
+
   // CPU Control Signals
   // SEC_CM: FETCH.CTRL.LC_GATED
   input  fetch_enable_t                fetch_enable_i,
@@ -354,6 +359,10 @@ module ibex_core import ibex_pkg::*; #(
 
   // for RVFI
   logic        illegal_insn_id, unused_illegal_insn_id; // ID stage sees an illegal instruction
+
+`ifdef DII
+  assign perf_imiss_o = perf_imiss;
+`endif
 
   //////////////////////
   // Clock management //
