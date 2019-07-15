@@ -131,10 +131,8 @@ module ibex_core #(
   logic        lsu_load_err;
   logic        lsu_store_err;
 
-  // ID performance counter signals
-  logic        is_decoding;
-
-  logic        data_misaligned;
+  // LSU signals
+  logic        lsu_addr_incr_req;
   logic [31:0] lsu_addr_last;
 
   // Jump and branch target and decision (EX->IF)
@@ -184,14 +182,12 @@ module ibex_core #(
   logic [31:0] regfile_wdata_lsu;
 
   // stall control
-  logic        halt_if;
-  logic        id_ready;
+  logic        id_in_ready;
   logic        ex_valid;
 
-  logic        if_valid;
-  logic        id_valid;
+  logic        if_id_pipe_reg_we;
 
-  logic        data_valid_lsu;
+  logic        lsu_data_valid;
 
   // Signals between instruction core interface and pipe (if and id stages)
   logic        instr_req_int;          // Id stage asserts a req to instruction core interface
@@ -215,13 +211,17 @@ module ibex_core #(
   logic        debug_ebreakm;
 
   // performance counter related signals
-  logic        insn_ret;
+  logic        instr_ret;
+  logic        instr_ret_compressed;
   logic        perf_imiss;
   logic        perf_jump;
   logic        perf_branch;
   logic        perf_tbranch;
   logic        perf_load;
   logic        perf_store;
+
+  // for RVFI
+  logic        id_out_valid, unused_id_out_valid;
 
   // RISC-V Formal Interface signals
 `ifdef RVFI
@@ -343,9 +343,8 @@ module ibex_core #(
       .csr_mtvec_o              ( csr_mtvec              ), // trap-vector base address
 
       // pipeline stalls
-      .halt_if_i                ( halt_if                ),
-      .id_ready_i               ( id_ready               ),
-      .if_valid_o               ( if_valid               ),
+      .id_in_ready_i            ( id_in_ready            ),
+      .if_id_pipe_reg_we_o      ( if_id_pipe_reg_we      ),
 
       .if_busy_o                ( if_busy                ),
       .perf_imiss_o             ( perf_imiss             )
@@ -369,7 +368,6 @@ module ibex_core #(
       .fetch_enable_i               ( fetch_enable_i         ),
       .ctrl_busy_o                  ( ctrl_busy              ),
       .core_ctrl_firstfetch_o       ( core_ctrl_firstfetch   ),
-      .is_decoding_o                ( is_decoding            ),
       .illegal_insn_o               ( illegal_insn_id        ),
 
       // from/to IF-ID pipeline register
@@ -383,6 +381,7 @@ module ibex_core #(
       .branch_decision_i            ( branch_decision        ),
 
       // IF and ID control signals
+      .id_in_ready_o                ( id_in_ready            ),
       .instr_valid_clear_o          ( instr_valid_clear      ),
       .instr_req_o                  ( instr_req_int          ),
       .pc_set_o                     ( pc_set                 ),
@@ -395,13 +394,10 @@ module ibex_core #(
       .pc_id_i                      ( pc_id                  ),
 
       // Stalls
-      .halt_if_o                    ( halt_if                ),
-
-      .id_ready_o                   ( id_ready               ),
       .ex_valid_i                   ( ex_valid               ),
-      .lsu_valid_i                  ( data_valid_lsu         ),
+      .lsu_valid_i                  ( lsu_data_valid         ),
 
-      .id_valid_o                   ( id_valid               ),
+      .id_out_valid_o               ( id_out_valid           ),
 
       .alu_operator_ex_o            ( alu_operator_ex        ),
       .alu_operand_a_ex_o           ( alu_operand_a_ex       ),
@@ -433,7 +429,7 @@ module ibex_core #(
       .data_reg_offset_ex_o         ( data_reg_offset_ex     ), // to load store unit
       .data_wdata_ex_o              ( data_wdata_ex          ), // to load store unit
 
-      .data_misaligned_i            ( data_misaligned        ),
+      .lsu_addr_incr_req_i          ( lsu_addr_incr_req      ),
       .lsu_addr_last_i              ( lsu_addr_last          ),
 
       .lsu_load_err_i               ( lsu_load_err           ),
@@ -471,9 +467,13 @@ module ibex_core #(
       // Performance Counters
       .perf_jump_o                  ( perf_jump              ),
       .perf_branch_o                ( perf_branch            ),
-      .perf_tbranch_o               ( perf_tbranch           )
+      .perf_tbranch_o               ( perf_tbranch           ),
+      .instr_ret_o                  ( instr_ret              ),
+      .instr_ret_compressed_o       ( instr_ret_compressed   )
   );
 
+  // for RVFI only
+  assign unused_id_out_valid = id_out_valid;
 
   ibex_ex_block #(
       .RV32M ( RV32M )
@@ -509,44 +509,42 @@ module ibex_core #(
   /////////////////////
 
   ibex_load_store_unit  load_store_unit_i (
-      .clk_i                 ( clk                ),
-      .rst_ni                ( rst_ni             ),
+      .clk_i                 ( clk                 ),
+      .rst_ni                ( rst_ni              ),
 
-      //output to data memory
-      .data_req_o            ( data_req_o         ),
-      .data_gnt_i            ( data_gnt_i         ),
-      .data_rvalid_i         ( data_rvalid_i      ),
-      .data_err_i            ( data_err_i         ),
+      // data interface
+      .data_req_o            ( data_req_o          ),
+      .data_gnt_i            ( data_gnt_i          ),
+      .data_rvalid_i         ( data_rvalid_i       ),
+      .data_err_i            ( data_err_i          ),
 
-      .data_addr_o           ( data_addr_o        ),
-      .data_we_o             ( data_we_o          ),
-      .data_be_o             ( data_be_o          ),
-      .data_wdata_o          ( data_wdata_o       ),
-      .data_rdata_i          ( data_rdata_i       ),
+      .data_addr_o           ( data_addr_o         ),
+      .data_we_o             ( data_we_o           ),
+      .data_be_o             ( data_be_o           ),
+      .data_wdata_o          ( data_wdata_o        ),
+      .data_rdata_i          ( data_rdata_i        ),
 
-      // signal from ex stage
-      .data_we_ex_i          ( data_we_ex         ),
-      .data_type_ex_i        ( data_type_ex       ),
-      .data_wdata_ex_i       ( data_wdata_ex      ),
-      .data_reg_offset_ex_i  ( data_reg_offset_ex ),
-      .data_sign_ext_ex_i    ( data_sign_ext_ex   ),
+      // signals to/from ID/EX stage
+      .data_we_ex_i          ( data_we_ex          ),
+      .data_type_ex_i        ( data_type_ex        ),
+      .data_wdata_ex_i       ( data_wdata_ex       ),
+      .data_reg_offset_ex_i  ( data_reg_offset_ex  ),
+      .data_sign_ext_ex_i    ( data_sign_ext_ex    ),
 
-      .data_rdata_ex_o       ( regfile_wdata_lsu  ),
-      .data_req_ex_i         ( data_req_ex        ),
+      .data_rdata_ex_o       ( regfile_wdata_lsu   ),
+      .data_req_ex_i         ( data_req_ex         ),
 
-      .adder_result_ex_i     ( alu_adder_result_ex),
+      .adder_result_ex_i     ( alu_adder_result_ex ),
 
-      .data_misaligned_o     ( data_misaligned    ),
-      .addr_last_o           ( lsu_addr_last      ),
+      .addr_incr_req_o       ( lsu_addr_incr_req   ),
+      .addr_last_o           ( lsu_addr_last       ),
+      .data_valid_o          ( lsu_data_valid      ),
 
       // exception signals
-      .load_err_o            ( lsu_load_err       ),
-      .store_err_o           ( lsu_store_err      ),
+      .load_err_o            ( lsu_load_err        ),
+      .store_err_o           ( lsu_store_err       ),
 
-      // control signals
-      .data_valid_o          ( data_valid_lsu     ),
-      .lsu_update_addr_o     (                    ),
-      .busy_o                ( lsu_busy           )
+      .busy_o                ( lsu_busy            )
   );
 
 
@@ -560,10 +558,6 @@ module ibex_core #(
   assign perf_load  = data_req_o & data_gnt_i & (~data_we_o);
   assign perf_store = data_req_o & data_gnt_i & data_we_o;
 
-  // An instruction has been executed and retired if the ID stage gets a new instruction and
-  // the previously seen instruction was valid.
-  assign insn_ret   = if_valid & ~illegal_insn_id;
-
   ibex_cs_registers #(
       .MHPMCounterNum   ( MHPMCounterNum   ),
       .MHPMCounterWidth ( MHPMCounterWidth ),
@@ -576,7 +570,6 @@ module ibex_core #(
       // Core and Cluster ID from outside
       .core_id_i               ( core_id_i              ),
       .cluster_id_i            ( cluster_id_i           ),
-
 
       // Interface to CSRs (SRAM like)
       .csr_access_i            ( csr_access             ),
@@ -609,12 +602,11 @@ module ibex_core #(
       .csr_mtval_i             ( csr_mtval              ),
       .illegal_csr_insn_o      ( illegal_csr_insn_id    ),
 
-      // performance counter related signals
-      .insn_ret_i              ( insn_ret               ),
-      .id_valid_i              ( id_valid               ),
-      .instr_is_compressed_i   ( instr_is_compressed_id ),
-      .is_decoding_i           ( is_decoding            ),
+      .instr_new_id_i          ( instr_new_id           ),
 
+      // performance counter related signals
+      .instr_ret_i             ( instr_ret              ),
+      .instr_ret_compressed_i  ( instr_ret_compressed   ),
       .imiss_i                 ( perf_imiss             ),
       .pc_set_i                ( pc_set                 ),
       .jump_i                  ( perf_jump              ),
@@ -677,7 +669,7 @@ module ibex_core #(
     endcase
   end
 
-  assign rvfi_valid_int = id_valid && if_valid && !illegal_c_insn_id;
+  assign rvfi_valid_int = id_out_valid && if_id_pipe_reg_we && !illegal_c_insn_id;
 
   always_comb begin
     if (instr_is_compressed_id) begin
@@ -754,58 +746,6 @@ module ibex_core #(
     rvfi_pc_id_q <= pc_id;
   end
   assign rvfi_changed_pc = rvfi_pc_id_q != pc_id;
-`endif
-
-
-`ifndef VERILATOR
-`ifdef TRACE_EXECUTION
-  ibex_tracer ibex_tracer_i (
-      .clk_i            ( clk_i                                ), // always-on clk for tracer
-      .rst_ni           ( rst_ni                               ),
-
-      .fetch_enable_i   ( fetch_enable_i                       ),
-      .core_id_i        ( core_id_i                            ),
-      .cluster_id_i     ( cluster_id_i                         ),
-
-      .pc_i             ( id_stage_i.pc_id_i                   ),
-      .instr_i          ( id_stage_i.instr_rdata_i             ),
-      .compressed_i     ( id_stage_i.instr_is_compressed_i     ),
-      .id_valid_i       ( id_stage_i.id_valid_o                ),
-      .is_decoding_i    ( id_stage_i.is_decoding_o             ),
-      .is_branch_i      ( id_stage_i.branch_in_id              ),
-      .branch_taken_i   ( id_stage_i.branch_set_q              ),
-      .pipe_flush_i     ( id_stage_i.controller_i.pipe_flush_i ),
-      .mret_insn_i      ( id_stage_i.controller_i.mret_insn_i  ),
-      .dret_insn_i      ( id_stage_i.controller_i.dret_insn_i  ),
-      .ecall_insn_i     ( id_stage_i.controller_i.ecall_insn_i ),
-      .ebrk_insn_i      ( id_stage_i.controller_i.ebrk_insn_i  ),
-      .csr_status_i     ( id_stage_i.controller_i.csr_status_i ),
-      .rs1_value_i      ( id_stage_i.operand_a_fw_id           ),
-      .rs2_value_i      ( id_stage_i.operand_b_fw_id           ),
-
-      .lsu_value_i      ( data_wdata_ex                        ),
-
-      .ex_reg_addr_i    ( id_stage_i.regfile_waddr             ),
-      .ex_reg_we_i      ( id_stage_i.regfile_we                ),
-      .ex_reg_wdata_i   ( id_stage_i.regfile_wdata             ),
-      .data_valid_lsu_i ( data_valid_lsu                       ),
-      .ex_data_addr_i   ( data_addr_o                          ),
-      .ex_data_req_i    ( data_req_o                           ),
-      .ex_data_gnt_i    ( data_gnt_i                           ),
-      .ex_data_we_i     ( data_we_o                            ),
-
-      .ex_data_wdata_i  ( data_wdata_o                         ),
-
-      .lsu_reg_wdata_i  ( regfile_wdata_lsu                    ),
-
-      .imm_i_type_i     ( id_stage_i.imm_i_type                ),
-      .imm_s_type_i     ( id_stage_i.imm_s_type                ),
-      .imm_b_type_i     ( id_stage_i.imm_b_type                ),
-      .imm_u_type_i     ( id_stage_i.imm_u_type                ),
-      .imm_j_type_i     ( id_stage_i.imm_j_type                ),
-      .zimm_rs1_type_i  ( id_stage_i.zimm_rs1_type             )
-  );
-`endif
 `endif
 
 endmodule

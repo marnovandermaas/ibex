@@ -16,7 +16,9 @@ Ibex User Manual
    exception_interrupts
    interrupts
    debug
+   tracer
    rvfi
+   examples
 
 
 .. toctree::

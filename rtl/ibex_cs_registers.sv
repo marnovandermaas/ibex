@@ -32,60 +32,58 @@ module ibex_cs_registers #(
     parameter bit RV32M                     = 0
 ) (
     // Clock and Reset
-    input  logic                      clk_i,
-    input  logic                      rst_ni,
+    input  logic                     clk_i,
+    input  logic                     rst_ni,
 
     // Core and Cluster ID
-    input  logic  [3:0]               core_id_i,
-    input  logic  [5:0]               cluster_id_i,
+    input  logic  [3:0]              core_id_i,
+    input  logic  [5:0]              cluster_id_i,
 
     // Interface to registers (SRAM like)
-    input  logic                      csr_access_i,
-    input  ibex_defines::csr_num_e    csr_addr_i,
-    input  logic [31:0]               csr_wdata_i,
-    input  ibex_defines::csr_op_e     csr_op_i,
-    output logic [31:0]               csr_rdata_o,
+    input  logic                     csr_access_i,
+    input  ibex_defines::csr_num_e   csr_addr_i,
+    input  logic [31:0]              csr_wdata_i,
+    input  ibex_defines::csr_op_e    csr_op_i,
+    output logic [31:0]              csr_rdata_o,
 
     // Interrupts
-    output logic                      m_irq_enable_o,
-    output logic [31:0]               csr_mepc_o,
+    output logic                     m_irq_enable_o,
+    output logic [31:0]              csr_mepc_o,
 
     // debug
-    input  ibex_defines::dbg_cause_e  debug_cause_i,
-    input  logic                      debug_csr_save_i,
-    output logic [31:0]               csr_depc_o,
-    output logic                      debug_single_step_o,
-    output logic                      debug_ebreakm_o,
+    input  ibex_defines::dbg_cause_e debug_cause_i,
+    input  logic                     debug_csr_save_i,
+    output logic [31:0]              csr_depc_o,
+    output logic                     debug_single_step_o,
+    output logic                     debug_ebreakm_o,
 
-    input  logic [31:0]               pc_if_i,
-    input  logic [31:0]               pc_id_i,
+    input  logic [31:0]              pc_if_i,
+    input  logic [31:0]              pc_id_i,
 
-    input  logic                      csr_save_if_i,
-    input  logic                      csr_save_id_i,
-    input  logic                      csr_restore_mret_i,
-    input  logic                      csr_restore_dret_i,
-    input  logic                      csr_save_cause_i,
-    input  logic [31:0]               csr_mtvec_i,
-    input  ibex_defines::exc_cause_e  csr_mcause_i,
-    input  logic [31:0]               csr_mtval_i,
-
-    output logic                      illegal_csr_insn_o,    // access to non-existent CSR,
+    input  logic                     csr_save_if_i,
+    input  logic                     csr_save_id_i,
+    input  logic                     csr_restore_mret_i,
+    input  logic                     csr_restore_dret_i,
+    input  logic                     csr_save_cause_i,
+    input  logic [31:0]              csr_mtvec_i,
+    input  ibex_defines::exc_cause_e csr_mcause_i,
+    input  logic [31:0]              csr_mtval_i,
+    output logic                     illegal_csr_insn_o,     // access to non-existent CSR,
                                                              // with wrong priviledge level, or
                                                              // missing write permissions
-    // Performance Counters
-    input  logic                      insn_ret_i,            // instr retired in ID/EX stage
-    input  logic                      id_valid_i,            // ID stage is done
-    input  logic                      instr_is_compressed_i, // compressed instr in ID
-    input  logic                      is_decoding_i,         // controller is in DECODE state
+    input  logic                     instr_new_id_i,         // ID stage sees a new instr
 
-    input  logic                      imiss_i,               // instr fetch
-    input  logic                      pc_set_i,              // PC was set to a new value
-    input  logic                      jump_i,                // jump instr seen (j, jr, jal, jalr)
-    input  logic                      branch_i,              // branch instr seen (bf, bnf)
-    input  logic                      branch_taken_i,        // branch was taken
-    input  logic                      mem_load_i,            // load from memory in this cycle
-    input  logic                      mem_store_i,           // store to memory in this cycle
-    input  logic                      lsu_busy_i
+    // Performance Counters
+    input  logic                     instr_ret_i,            // instr retired in ID/EX stage
+    input  logic                     instr_ret_compressed_i, // compressed instr retired
+    input  logic                     imiss_i,                // instr fetch
+    input  logic                     pc_set_i,               // PC was set to a new value
+    input  logic                     jump_i,                 // jump instr seen (j, jr, jal, jalr)
+    input  logic                     branch_i,               // branch instr seen (bf, bnf)
+    input  logic                     branch_taken_i,         // branch was taken
+    input  logic                     mem_load_i,             // load from memory in this cycle
+    input  logic                     mem_store_i,            // store to memory in this cycle
+    input  logic                     lsu_busy_i
 );
 
   import ibex_defines::*;
@@ -151,22 +149,22 @@ module ibex_cs_registers #(
   logic [31:0] exception_pc;
 
   // CSRs
-  Status_t     mstatus_q, mstatus_n;
-  logic [31:0] mscratch_q, mscratch_n;
-  logic [31:0] mepc_q, mepc_n;
-  logic  [5:0] mcause_q, mcause_n;
-  logic [31:0] mtval_q, mtval_n;
-  Dcsr_t       dcsr_q, dcsr_n;
-  logic [31:0] depc_q, depc_n;
-  logic [31:0] dscratch0_q, dscratch0_n;
-  logic [31:0] dscratch1_q, dscratch1_n;
+  Status_t     mstatus_q, mstatus_d;
+  logic [31:0] mscratch_q, mscratch_d;
+  logic [31:0] mepc_q, mepc_d;
+  logic  [5:0] mcause_q, mcause_d;
+  logic [31:0] mtval_q, mtval_d;
+  Dcsr_t       dcsr_q, dcsr_d;
+  logic [31:0] depc_q, depc_d;
+  logic [31:0] dscratch0_q, dscratch0_d;
+  logic [31:0] dscratch1_q, dscratch1_d;
 
   // Hardware performance monitor signals
-  logic [31:0] mcountinhibit_n, mcountinhibit_q, mcountinhibit;
+  logic [31:0] mcountinhibit_d, mcountinhibit_q, mcountinhibit;
   logic [31:0] mcountinhibit_force;
   logic        mcountinhibit_we;
   logic [63:0] mhpmcounter_mask [32];
-  logic [63:0] mhpmcounter_n [32];
+  logic [63:0] mhpmcounter_d [32];
   logic [63:0] mhpmcounter_q [32];
   logic [31:0] mhpmcounter_we;
   logic [31:0] mhpmcounterh_we;
@@ -286,15 +284,15 @@ module ibex_cs_registers #(
   always_comb begin
     exception_pc = pc_id_i;
 
-    mstatus_n    = mstatus_q;
-    mscratch_n   = mscratch_q;
-    mepc_n       = mepc_q;
-    mcause_n     = mcause_q;
-    mtval_n      = mtval_q;
-    dcsr_n       = dcsr_q;
-    depc_n       = depc_q;
-    dscratch0_n  = dscratch0_q;
-    dscratch1_n  = dscratch1_q;
+    mstatus_d    = mstatus_q;
+    mscratch_d   = mscratch_q;
+    mepc_d       = mepc_q;
+    mcause_d     = mcause_q;
+    mtval_d      = mtval_q;
+    dcsr_d       = dcsr_q;
+    depc_d       = depc_q;
+    dscratch0_d  = dscratch0_q;
+    dscratch1_d  = dscratch1_q;
     mcountinhibit_we = 1'b0;
     mhpmcounter_we   = '0;
     mhpmcounterh_we  = '0;
@@ -303,7 +301,7 @@ module ibex_cs_registers #(
       // mstatus: IE bit
       CSR_MSTATUS: begin
         if (csr_we_int) begin
-          mstatus_n = '{
+          mstatus_d = '{
               mie:  csr_wdata_int[`MSTATUS_MIE_BITS],
               mpie: csr_wdata_int[`MSTATUS_MPIE_BITS],
               mpp:  PRIV_LVL_M
@@ -311,52 +309,52 @@ module ibex_cs_registers #(
         end
       end
 
-      CSR_MSCRATCH: if (csr_we_int) mscratch_n = csr_wdata_int;
+      CSR_MSCRATCH: if (csr_we_int) mscratch_d = csr_wdata_int;
 
       // mepc: exception program counter
-      CSR_MEPC: if (csr_we_int) mepc_n = {csr_wdata_int[31:1], 1'b0};
+      CSR_MEPC: if (csr_we_int) mepc_d = {csr_wdata_int[31:1], 1'b0};
 
       // mcause
-      CSR_MCAUSE: if (csr_we_int) mcause_n = {csr_wdata_int[31], csr_wdata_int[4:0]};
+      CSR_MCAUSE: if (csr_we_int) mcause_d = {csr_wdata_int[31], csr_wdata_int[4:0]};
 
       // mtval: trap value
-      CSR_MTVAL: if (csr_we_int) mtval_n = csr_wdata_int;
+      CSR_MTVAL: if (csr_we_int) mtval_d = csr_wdata_int;
 
       CSR_DCSR: begin
         if (csr_we_int) begin
-          dcsr_n = csr_wdata_int;
-          dcsr_n.xdebugver = XDEBUGVER_STD;
-          dcsr_n.prv = PRIV_LVL_M; // only M-mode is supported
+          dcsr_d = csr_wdata_int;
+          dcsr_d.xdebugver = XDEBUGVER_STD;
+          dcsr_d.prv = PRIV_LVL_M; // only M-mode is supported
 
           // currently not supported:
-          dcsr_n.nmip = 1'b0;
-          dcsr_n.mprven = 1'b0;
-          dcsr_n.stopcount = 1'b0;
-          dcsr_n.stoptime = 1'b0;
+          dcsr_d.nmip = 1'b0;
+          dcsr_d.mprven = 1'b0;
+          dcsr_d.stopcount = 1'b0;
+          dcsr_d.stoptime = 1'b0;
 
           // forced to be zero
-          dcsr_n.zero0 = 1'b0;
-          dcsr_n.zero1 = 1'b0;
-          dcsr_n.zero2 = 12'h0;
+          dcsr_d.zero0 = 1'b0;
+          dcsr_d.zero1 = 1'b0;
+          dcsr_d.zero2 = 12'h0;
         end
       end
 
       CSR_DPC: begin
         // Only valid PC addresses are allowed (half-word aligned with C ext.)
         if (csr_we_int && csr_wdata_int[0] == 1'b0) begin
-          depc_n = csr_wdata_int;
+          depc_d = csr_wdata_int;
         end
       end
 
       CSR_DSCRATCH0: begin
         if (csr_we_int) begin
-          dscratch0_n = csr_wdata_int;
+          dscratch0_d = csr_wdata_int;
         end
       end
 
       CSR_DSCRATCH1: begin
         if (csr_we_int) begin
-          dscratch1_n = csr_wdata_int;
+          dscratch1_d = csr_wdata_int;
         end
       end
 
@@ -419,27 +417,27 @@ module ibex_cs_registers #(
         if (debug_csr_save_i) begin
           // all interrupts are masked, don't update cause, epc, tval dpc and
           // mpstatus
-          dcsr_n.prv   = PRIV_LVL_M;
-          dcsr_n.cause = debug_cause_i;
-          depc_n       = exception_pc;
+          dcsr_d.prv   = PRIV_LVL_M;
+          dcsr_d.cause = debug_cause_i;
+          depc_d       = exception_pc;
         end else begin
-          mstatus_n.mpie = mstatus_q.mie;
-          mstatus_n.mie  = 1'b0;
-          mstatus_n.mpp  = PRIV_LVL_M;
-          mepc_n         = exception_pc;
-          mcause_n       = {csr_mcause_i};
-          mtval_n        = csr_mtval_i;
+          mstatus_d.mpie = mstatus_q.mie;
+          mstatus_d.mie  = 1'b0;
+          mstatus_d.mpp  = PRIV_LVL_M;
+          mepc_d         = exception_pc;
+          mcause_d       = {csr_mcause_i};
+          mtval_d        = csr_mtval_i;
         end
       end //csr_save_cause_i
 
       csr_restore_mret_i: begin //MRET
-        mstatus_n.mie  = mstatus_q.mpie;
-        mstatus_n.mpie = 1'b1;
+        mstatus_d.mie  = mstatus_q.mpie;
+        mstatus_d.mpie = 1'b1;
       end //csr_restore_mret_i
 
       csr_restore_dret_i: begin //DRET
-        mstatus_n.mie  = mstatus_q.mpie;
-        mstatus_n.mpie = 1'b1;
+        mstatus_d.mie  = mstatus_q.mpie;
+        mstatus_d.mpie = 1'b1;
       end //csr_restore_dret_i
 
       default:;
@@ -466,7 +464,7 @@ module ibex_cs_registers #(
   end
 
   // only write CSRs during one clock cycle
-  assign csr_we_int  = csr_wreq & is_decoding_i;
+  assign csr_we_int  = csr_wreq & instr_new_id_i;
 
   assign csr_rdata_o = csr_rdata_int;
 
@@ -502,18 +500,18 @@ module ibex_cs_registers #(
     end else begin
       // update CSRs
       mstatus_q  <= '{
-          mie:  mstatus_n.mie,
-          mpie: mstatus_n.mpie,
+          mie:  mstatus_d.mie,
+          mpie: mstatus_d.mpie,
           mpp:  PRIV_LVL_M
       };
-      mscratch_q  <= mscratch_n;
-      mepc_q      <= mepc_n;
-      mcause_q    <= mcause_n;
-      mtval_q     <= mtval_n;
-      dcsr_q      <= dcsr_n;
-      depc_q      <= depc_n;
-      dscratch0_q <= dscratch0_n;
-      dscratch1_q <= dscratch1_n;
+      mscratch_q  <= mscratch_d;
+      mepc_q      <= mepc_d;
+      mcause_q    <= mcause_d;
+      mtval_q     <= mtval_d;
+      dcsr_q      <= dcsr_d;
+      depc_q      <= depc_d;
+      dscratch0_q <= dscratch0_d;
+      dscratch1_q <= dscratch1_d;
     end
   end
 
@@ -524,12 +522,12 @@ module ibex_cs_registers #(
   // update enable signals
   always_comb begin : mcountinhibit_update
     if (mcountinhibit_we == 1'b1) begin
-      mcountinhibit_n = csr_wdata_int;
+      mcountinhibit_d = csr_wdata_int;
     end else begin
-      mcountinhibit_n = mcountinhibit_q;
+      mcountinhibit_d = mcountinhibit_q;
     end
     // bit 1 must always be 0
-    mcountinhibit_n[1] = 1'b0;
+    mcountinhibit_d[1] = 1'b0;
   end
 
   assign mcountinhibit_force = {{29-MHPMCounterNum{1'b1}}, {MHPMCounterNum{1'b0}}, 3'b000};
@@ -539,19 +537,18 @@ module ibex_cs_registers #(
   always_comb begin : gen_mhpmcounter_incr
 
     // active counters
-    mhpmcounter_incr[0]  = 1'b1;                // mcycle
-    mhpmcounter_incr[1]  = 1'b0;                // reserved
-    mhpmcounter_incr[2]  = insn_ret_i;          // minstret
-    mhpmcounter_incr[3]  = lsu_busy_i;          // cycles waiting for data memory
-    mhpmcounter_incr[4]  = imiss_i & ~pc_set_i; // cycles waiting for instr fetches ex.
-                                                // jumps and branches
-    mhpmcounter_incr[5]  = mem_load_i;          // num of loads
-    mhpmcounter_incr[6]  = mem_store_i;         // num of stores
-    mhpmcounter_incr[7]  = jump_i;              // num of jumps (unconditional)
-    mhpmcounter_incr[8]  = branch_i;            // num of branches (conditional)
-    mhpmcounter_incr[9]  = branch_taken_i;      // num of taken branches (conditional)
-    mhpmcounter_incr[10] = is_decoding_i        // num of compressed instr
-        & id_valid_i & instr_is_compressed_i;
+    mhpmcounter_incr[0]  = 1'b1;                   // mcycle
+    mhpmcounter_incr[1]  = 1'b0;                   // reserved
+    mhpmcounter_incr[2]  = instr_ret_i;            // minstret
+    mhpmcounter_incr[3]  = lsu_busy_i;             // cycles waiting for data memory
+    mhpmcounter_incr[4]  = imiss_i & ~pc_set_i;    // cycles waiting for instr fetches
+                                                   // excl. jump and branch set cycles
+    mhpmcounter_incr[5]  = mem_load_i;             // num of loads
+    mhpmcounter_incr[6]  = mem_store_i;            // num of stores
+    mhpmcounter_incr[7]  = jump_i;                 // num of jumps (unconditional)
+    mhpmcounter_incr[8]  = branch_i;               // num of branches (conditional)
+    mhpmcounter_incr[9]  = branch_taken_i;         // num of taken branches (conditional)
+    mhpmcounter_incr[10] = instr_ret_compressed_i; // num of compressed instr
 
     // inactive counters
     for (int unsigned i=3+MHPMCounterNum; i<32; i++) begin : gen_mhpmcounter_incr_inactive
@@ -596,20 +593,20 @@ module ibex_cs_registers #(
 
   // update
   always_comb begin : mhpmcounter_update
-    mhpmcounter_n = mhpmcounter_q;
+    mhpmcounter_d = mhpmcounter_q;
 
     for (int i=0; i<32; i++) begin : gen_mhpmcounter_update
 
       // increment
       if (mhpmcounter_incr[i] & ~mcountinhibit[i]) begin
-        mhpmcounter_n[i] = mhpmcounter_mask[i] & (mhpmcounter_q[i] + 64'h1);
+        mhpmcounter_d[i] = mhpmcounter_mask[i] & (mhpmcounter_q[i] + 64'h1);
       end
 
       // write
       if (mhpmcounter_we[i]) begin
-        mhpmcounter_n[i][31: 0] = mhpmcounter_mask[i][31: 0] & csr_wdata_int;
+        mhpmcounter_d[i][31: 0] = mhpmcounter_mask[i][31: 0] & csr_wdata_int;
       end else if (mhpmcounterh_we[i]) begin
-        mhpmcounter_n[i][63:32] = mhpmcounter_mask[i][63:32] & csr_wdata_int;
+        mhpmcounter_d[i][63:32] = mhpmcounter_mask[i][63:32] & csr_wdata_int;
       end
     end
   end
@@ -622,8 +619,8 @@ module ibex_cs_registers #(
         mhpmcounter_q[i] <= '0;
       end
     end else begin
-      mhpmcounter_q      <= mhpmcounter_n;
-      mcountinhibit_q    <= mcountinhibit_n;
+      mhpmcounter_q      <= mhpmcounter_d;
+      mcountinhibit_q    <= mcountinhibit_d;
     end
   end
 

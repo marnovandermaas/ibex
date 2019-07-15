@@ -12,7 +12,7 @@ Ibex implements all the Control and Status Registers (CSRs) listed in the follow
 +---------+--------------------+--------+-----------------------------------------------+
 |  0x301  | ``misa``           | WARL   | Machine ISA and Extensions                    |
 +---------+--------------------+--------+-----------------------------------------------+
-|  0x305  | ``mtvec``          | R      | Machine Trap-Vector Base Address              |
+|  0x305  | ``mtvec``          | WARL   | Machine Trap-Vector Base Address              |
 +---------+--------------------+--------+-----------------------------------------------+
 |  0x320  | ``mcountinhibit``  | RW     | Machine Counter-Inhibit Register              |
 +---------+--------------------+--------+-----------------------------------------------+
@@ -61,6 +61,8 @@ Ibex implements all the Control and Status Registers (CSRs) listed in the follow
 |  0xF14  | ``mhartid``        | R      | Hardware Thread ID                            |
 +---------+--------------------+--------+-----------------------------------------------+
 
+See the :ref:`performance-counters` documentation for a description of the counter registers.
+
 
 Machine Status (mstatus)
 ------------------------
@@ -85,13 +87,23 @@ When the MRET instruction is executed, the value of MPIE will be stored back to 
 If you want to enable interrupt handling in your exception handler, set ``mstatus``.MIE to 1'b1 inside your handler code.
 
 
+Machine ISA Register (misa)
+---------------------------
+
+CSR Address: ``0x301``
+
+``misa`` is a WARL register which describes the ISA supported by the hart.
+On Ibex, ``misa`` is hard-wired, i.e. it will remain unchanged after any write.
+
+
 Machine Trap-Vector Base Address (mtvec)
 ----------------------------------------
 
 CSR Address: ``0x305``
 
 When an exception is encountered, the core jumps to the corresponding handler using the content of ``mtvec`` as base address.
-It is a read-only register which contains the boot address.
+It is a WARL register which contains the boot address.
+It contains a hard-wired value, so will remain unchanged after any writes.
 ``mtvec``.MODE is set to 2'b01 to indicate vectored interrupt handling.
 
 

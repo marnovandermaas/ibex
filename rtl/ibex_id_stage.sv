@@ -43,7 +43,6 @@ module ibex_id_stage #(
     input  logic                      fetch_enable_i,
     output logic                      ctrl_busy_o,
     output logic                      core_ctrl_firstfetch_o,
-    output logic                      is_decoding_o,
     output logic                      illegal_insn_o,
 
     // Interface to IF stage
@@ -54,8 +53,7 @@ module ibex_id_stage #(
     input  logic                      instr_is_compressed_i,
     output logic                      instr_req_o,
     output logic                      instr_valid_clear_o,   // kill instr in IF-ID reg
-    output logic                      id_ready_o,            // ID stage is ready for next instr
-    output logic                      halt_if_o,             // ID stage requests IF stage to halt
+    output logic                      id_in_ready_o,         // ID stage is ready for next instr
 
     // Jumps and branches
     input  logic                      branch_decision_i,
@@ -70,9 +68,9 @@ module ibex_id_stage #(
     input  logic [31:0]               pc_id_i,
 
     // Stalls
-    input  logic                      ex_valid_i,  // EX stage has valid output
-    input  logic                      lsu_valid_i, // LSU has valid output, or is done
-    output logic                      id_valid_o,  // ID stage is done
+    input  logic                      ex_valid_i,     // EX stage has valid output
+    input  logic                      lsu_valid_i,    // LSU has valid output, or is done
+    output logic                      id_out_valid_o, // ID stage is done
 
     // ALU
     output ibex_defines::alu_op_e     alu_operator_ex_o,
@@ -106,7 +104,7 @@ module ibex_id_stage #(
     output logic [1:0]                data_reg_offset_ex_o,
     output logic [31:0]               data_wdata_ex_o,
 
-    input  logic                      data_misaligned_i,
+    input  logic                      lsu_addr_incr_req_i,
     input  logic [31:0]               lsu_addr_last_i,
 
     // Interrupt signals
@@ -145,28 +143,27 @@ module ibex_id_stage #(
     // Performance Counters
     output logic                      perf_jump_o,    // executing a jump instr
     output logic                      perf_branch_o,  // executing a branch instr
-    output logic                      perf_tbranch_o  // executing a taken branch instr
+    output logic                      perf_tbranch_o, // executing a taken branch instr
+    output logic                      instr_ret_o,
+    output logic                      instr_ret_compressed_o
 );
 
   import ibex_defines::*;
 
-  // Decoder/Controller ID stage internal signals
-  logic        deassert_we;
-
+  // Decoder/Controller, ID stage internal signals
   logic        illegal_insn_dec;
   logic        ebrk_insn;
   logic        mret_insn_dec;
   logic        dret_insn_dec;
   logic        ecall_insn_dec;
-  logic        pipe_flush_dec;
+  logic        wfi_insn_dec;
 
-  logic        branch_in_id, branch_in_dec;
+  logic        branch_in_dec;
   logic        branch_set_n, branch_set_q;
   logic        jump_in_dec;
   logic        jump_set;
 
   logic        instr_executing;
-  logic        instr_multicycle;
   logic        instr_multicycle_done_n, instr_multicycle_done_q;
   logic        stall_lsu;
   logic        stall_multdiv;
@@ -194,7 +191,6 @@ module ibex_id_stage #(
   logic [4:0]  regfile_raddr_b;
 
   logic [4:0]  regfile_waddr;
-  logic        regfile_we_id, regfile_we_dec;
 
   logic [31:0] regfile_rdata_a;
   logic [31:0] regfile_rdata_b;
@@ -202,6 +198,7 @@ module ibex_id_stage #(
 
   rf_wd_sel_e  regfile_wdata_sel;
   logic        regfile_we;
+  logic        regfile_we_wb, regfile_we_dec;
 
   // ALU Control
   alu_op_e     alu_operator;
@@ -228,10 +225,6 @@ module ibex_id_stage #(
   // CSR control
   logic        csr_status;
 
-  // For tracer
-  logic [31:0] operand_a_fw_id, unused_operand_a_fw_id;
-  logic [31:0] operand_b_fw_id, unused_operand_b_fw_id;
-
   logic [31:0] alu_operand_a;
   logic [31:0] alu_operand_b;
 
@@ -240,12 +233,9 @@ module ibex_id_stage #(
   /////////////
 
   // Misaligned loads/stores result in two aligned loads/stores, compute second address
-  assign alu_op_a_mux_sel = data_misaligned_i ? OP_A_FWD        : alu_op_a_mux_sel_dec;
-  assign alu_op_b_mux_sel = data_misaligned_i ? OP_B_IMM        : alu_op_b_mux_sel_dec;
-  assign imm_b_mux_sel    = data_misaligned_i ? IMM_B_INCR_ADDR : imm_b_mux_sel_dec;
-
-  // do not write back the second address since the first calculated address was the correct one
-  assign regfile_we_id    = data_misaligned_i ? 1'b0            : regfile_we_dec & ~deassert_we;
+  assign alu_op_a_mux_sel = lsu_addr_incr_req_i ? OP_A_FWD        : alu_op_a_mux_sel_dec;
+  assign alu_op_b_mux_sel = lsu_addr_incr_req_i ? OP_B_IMM        : alu_op_b_mux_sel_dec;
+  assign imm_b_mux_sel    = lsu_addr_incr_req_i ? IMM_B_INCR_ADDR : imm_b_mux_sel_dec;
 
   ///////////////////
   // Operand A MUX //
@@ -286,16 +276,14 @@ module ibex_id_stage #(
   // ALU MUX for Operand B
   assign alu_operand_b = (alu_op_b_mux_sel == OP_B_IMM) ? imm_b : regfile_rdata_b;
 
-  // Signals used by tracer
-  assign operand_a_fw_id = data_misaligned_i ? lsu_addr_last_i : regfile_rdata_a;
-  assign operand_b_fw_id = regfile_rdata_b;
-
-  assign unused_operand_a_fw_id = operand_a_fw_id;
-  assign unused_operand_b_fw_id = operand_b_fw_id;
-
   ///////////////////////
   // Register File MUX //
   ///////////////////////
+
+  // Register file write enable mux - do not propagate illegal CSR ops, do not write when idle,
+  // for loads/stores and multdiv operations write when the data is ready only
+  assign regfile_we = (illegal_csr_insn_i || !instr_executing) ? 1'b0          :
+                      (data_req_dec || multdiv_en_dec)         ? regfile_we_wb : regfile_we_dec;
 
   // Register file write data mux
   always_comb begin : regfile_wdata_mux
@@ -353,7 +341,7 @@ module ibex_id_stage #(
       .mret_insn_o                     ( mret_insn_dec        ),
       .dret_insn_o                     ( dret_insn_dec        ),
       .ecall_insn_o                    ( ecall_insn_dec       ),
-      .pipe_flush_o                    ( pipe_flush_dec       ),
+      .wfi_insn_o                      ( wfi_insn_dec         ),
       .jump_set_o                      ( jump_set             ),
 
       // from IF-ID pipeline register
@@ -421,15 +409,13 @@ module ibex_id_stage #(
       .fetch_enable_i                 ( fetch_enable_i         ),
       .ctrl_busy_o                    ( ctrl_busy_o            ),
       .first_fetch_o                  ( core_ctrl_firstfetch_o ),
-      .is_decoding_o                  ( is_decoding_o          ),
 
       // decoder related signals
-      .deassert_we_o                  ( deassert_we            ),
       .illegal_insn_i                 ( illegal_insn_o         ),
       .ecall_insn_i                   ( ecall_insn_dec         ),
       .mret_insn_i                    ( mret_insn_dec          ),
       .dret_insn_i                    ( dret_insn_dec          ),
-      .pipe_flush_i                   ( pipe_flush_dec         ),
+      .wfi_insn_i                     ( wfi_insn_dec           ),
       .ebrk_insn_i                    ( ebrk_insn              ),
       .csr_status_i                   ( csr_status             ),
 
@@ -441,8 +427,7 @@ module ibex_id_stage #(
 
       // to IF-ID pipeline
       .instr_valid_clear_o            ( instr_valid_clear_o    ),
-      .id_ready_o                     ( id_ready_o             ),
-      .halt_if_o                      ( halt_if_o              ),
+      .id_in_ready_o                  ( id_in_ready_o          ),
 
       // from prefetcher
       .instr_req_o                    ( instr_req_o            ),
@@ -459,11 +444,8 @@ module ibex_id_stage #(
       .store_err_i                    ( lsu_store_err_i        ),
 
       // jump/branch control
-      .branch_in_id_i                 ( branch_in_id           ),
       .branch_set_i                   ( branch_set_q           ),
       .jump_set_i                     ( jump_set               ),
-
-      .instr_multicycle_i             ( instr_multicycle       ),
 
       .irq_i                          ( irq_i                  ),
       // Interrupt Controller Signals
@@ -498,7 +480,7 @@ module ibex_id_stage #(
       .stall_jump_i                   ( stall_jump             ),
       .stall_branch_i                 ( stall_branch           ),
 
-      .id_valid_o                     ( id_valid_o             ),
+      .id_out_valid_o                 ( id_out_valid_o         ),
 
       // Performance Counters
       .perf_jump_o                    ( perf_jump_o            ),
@@ -539,7 +521,6 @@ module ibex_id_stage #(
   assign data_req_id     = instr_executing ? data_req_dec  : 1'b0;
   assign mult_en_id      = instr_executing ? mult_en_dec   : 1'b0;
   assign div_en_id       = instr_executing ? div_en_dec    : 1'b0;
-  assign branch_in_id    = instr_executing ? branch_in_dec : 1'b0;
 
   ///////////
   // ID-EX //
@@ -590,15 +571,15 @@ module ibex_id_stage #(
 
   always_comb begin : id_wb_fsm
     id_wb_fsm_ns            = id_wb_fsm_cs;
-    instr_multicycle        = 1'b0;
     instr_multicycle_done_n = instr_multicycle_done_q;
-    regfile_we              = regfile_we_id;
+    regfile_we_wb           = 1'b0;
     stall_lsu               = 1'b0;
     stall_multdiv           = 1'b0;
     stall_jump              = 1'b0;
     stall_branch            = 1'b0;
     branch_set_n            = 1'b0;
     perf_branch_o           = 1'b0;
+    instr_ret_o             = 1'b0;
 
     unique case (id_wb_fsm_cs)
 
@@ -609,37 +590,34 @@ module ibex_id_stage #(
           unique case (1'b1)
             data_req_dec: begin
               // LSU operation
-              regfile_we              = 1'b0;
               id_wb_fsm_ns            = WAIT_MULTICYCLE;
               stall_lsu               = 1'b1;
-              instr_multicycle        = 1'b1;
               instr_multicycle_done_n = 1'b0;
             end
             multdiv_en_dec: begin
               // MUL or DIV operation
-              regfile_we              = 1'b0;
               id_wb_fsm_ns            = WAIT_MULTICYCLE;
               stall_multdiv           = 1'b1;
-              instr_multicycle        = 1'b1;
               instr_multicycle_done_n = 1'b0;
             end
             branch_in_dec: begin
               // cond branch operation
               id_wb_fsm_ns            =  branch_decision_i ? WAIT_MULTICYCLE : IDLE;
               stall_branch            =  branch_decision_i;
-              instr_multicycle        =  branch_decision_i;
               instr_multicycle_done_n = ~branch_decision_i;
               branch_set_n            =  branch_decision_i;
               perf_branch_o           =  1'b1;
+              instr_ret_o             = ~branch_decision_i;
             end
             jump_in_dec: begin
               // uncond branch operation
               id_wb_fsm_ns            = WAIT_MULTICYCLE;
               stall_jump              = 1'b1;
-              instr_multicycle        = 1'b1;
               instr_multicycle_done_n = 1'b0;
             end
-            default:;
+            default: begin
+              instr_ret_o             = 1'b1;
+            end
           endcase
         end
       end
@@ -648,9 +626,9 @@ module ibex_id_stage #(
         if ((data_req_dec & lsu_valid_i) | (~data_req_dec & ex_valid_i)) begin
           id_wb_fsm_ns            = IDLE;
           instr_multicycle_done_n = 1'b1;
+          regfile_we_wb           = regfile_we_dec;
+          instr_ret_o             = 1'b1;
         end else begin
-          regfile_we              = 1'b0;
-          instr_multicycle        = 1'b1;
           stall_lsu               = data_req_dec;
           stall_multdiv           = multdiv_en_dec;
           stall_branch            = branch_in_dec;
@@ -664,6 +642,8 @@ module ibex_id_stage #(
     endcase
   end
 
+  assign instr_ret_compressed_o = instr_ret_o & instr_is_compressed_i;
+
   ////////////////
   // Assertions //
   ////////////////
@@ -671,12 +651,12 @@ module ibex_id_stage #(
 `ifndef VERILATOR
   // make sure that branch decision is valid when jumping
   assert property (
-    @(posedge clk_i) (branch_decision_i !== 1'bx || branch_in_id == 1'b0) ) else
+    @(posedge clk_i) (branch_decision_i !== 1'bx || branch_in_dec == 1'b0) ) else
       $display("Branch decision is X");
 
 `ifdef CHECK_MISALIGNED
   assert property (
-    @(posedge clk_i) (~data_misaligned_i) ) else
+    @(posedge clk_i) (~lsu_addr_incr_req_i) ) else
       $display("Misaligned memory access at %x",pc_id_i);
 `endif
 
