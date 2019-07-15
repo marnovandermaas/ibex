@@ -29,11 +29,11 @@ module ibex_if_stage import ibex_pkg::*; #(
   parameter bit          MemECC            = 1'b0,
   parameter int unsigned MemDataWidth      = MemECC ? 32 + 7 : 32
 ) (
-  input  logic                         clk_i,
-  input  logic                         rst_ni,
+  input  logic                        clk_i,
+  input  logic                        rst_ni,
 
-  input  logic [31:0]                  boot_addr_i,              // also used for mtvec
-  input  logic                         req_i,                    // instruction request control
+  input  logic [31:0]                 boot_addr_i,              // also used for mtvec
+  input  logic                        req_i,                    // instruction request control
 
   // instruction cache interface
   output logic                        instr_req_o,
