@@ -89,10 +89,12 @@ int main(int argc, char** argv, char** env) {
     Vibex_core_avalon* top = new Vibex_core_avalon;
 
     // set up tracing
-    //Verilated::traceEverOn(true);
-    //VerilatedVcdC trace_obj;
-    //top->trace(&trace_obj, 99);
-    //trace_obj.open("vlt_d.vcd");
+    #if VM_TRACE
+    Verilated::traceEverOn(true);
+    VerilatedVcdC trace_obj;
+    top->trace(&trace_obj, 99);
+    trace_obj.open("vlt_d.vcd");
+    #endif
 
     uint8_t memory[65536] = {0};
 
@@ -406,17 +408,21 @@ int main(int argc, char** argv, char** env) {
             top->eval();
 
             // tracing
-            //trace_obj.dump(main_time);
-            //trace_obj.flush();
-            //main_time++;
+            #if VM_TRACE
+            trace_obj.dump(main_time);
+            trace_obj.flush();
+            main_time++;
+            #endif
 
 
             top->clk_i = 0;
             top->eval();
 
             // tracing
-            //trace_obj.dump(main_time);
-            //trace_obj.flush();
+            #if VM_TRACE
+            trace_obj.dump(main_time);
+            trace_obj.flush();
+            #endif
 
             main_time++;
 
