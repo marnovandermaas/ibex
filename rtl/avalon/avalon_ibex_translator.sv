@@ -43,8 +43,6 @@ module avalon_ibex_translator_main (
             write_good <= 0;
         else begin
             write_good <= !avm_main_waitrequest && data_req_i && data_we_i;
-            $display("rvalid in translator: ");
-            $display(data_rvalid_o);
         end
         
     // error mapping (unused)
