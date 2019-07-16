@@ -96,7 +96,8 @@ module ibex_prefetch_buffer (
   // Fetch addr //
   ////////////////
 
-  assign fetch_addr = {instr_addr_q[31:2], 2'b00} + 32'd4;
+  //assign fetch_addr = {instr_addr_q[31:2], 2'b00} + 32'd4;
+  assign fetch_addr = {instr_addr_q[31:0]} + 32'd4;
   assign fifo_clear = branch_i;
 
   //////////////////////////////////////////////////////////////////////////////

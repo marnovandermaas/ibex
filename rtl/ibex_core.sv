@@ -262,6 +262,8 @@ module ibex_core #(
   assign perf_imiss_o = perf_imiss;
 `endif
 
+  logic [31:0] pc_next;
+
   //////////////////////
   // Clock management //
   //////////////////////
@@ -346,6 +348,7 @@ module ibex_core #(
       .id_in_ready_i            ( id_in_ready            ),
       .if_id_pipe_reg_we_o      ( if_id_pipe_reg_we      ),
 
+      .pc_next                  ( pc_next                ),
       .if_busy_o                ( if_busy                ),
       .perf_imiss_o             ( perf_imiss             )
   );
@@ -620,7 +623,7 @@ module ibex_core #(
 `ifdef RVFI
   always_ff @(posedge clk) begin
     rvfi_halt      <= '0;
-    rvfi_trap      <= '0;
+    rvfi_trap      <= lsu_store_err || lsu_load_err;
     rvfi_intr      <= irq_ack_o;
     rvfi_order     <= rst_ni ? rvfi_order + rvfi_valid : '0;
     rvfi_insn      <= rvfi_insn_opcode;
@@ -630,12 +633,12 @@ module ibex_core #(
     rvfi_pc_rdata  <= pc_id;
     rvfi_mem_rmask <= rvfi_mem_mask_int;
     rvfi_mem_wmask <= data_we_o ? rvfi_mem_mask_int : 4'b0000;
-    rvfi_valid     <= rvfi_valid_int;
+    rvfi_valid     <= instr_ret;
     rvfi_rs1_rdata <= rvfi_rs1_data_d;
     rvfi_rs2_rdata <= rvfi_rs2_data_d;
+    rvfi_pc_wdata  <= (pc_set || lsu_load_err || lsu_store_err) ? (pc_mux_id == 3'b001 ? jump_target_ex : pc_next) : pc_if;
   end
 
-  assign rvfi_pc_wdata  = pc_id;
   assign rvfi_rd_wdata  = rvfi_rd_wdata_q;
   assign rvfi_rd_addr   = rvfi_rd_addr_q;
   assign rvfi_mem_rdata = rvfi_mem_rdata_q;

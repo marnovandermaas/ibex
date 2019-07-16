@@ -84,6 +84,7 @@ module ibex_if_stage #(
     output logic                      if_id_pipe_reg_we_o,      // IF-ID pipeline reg write enable
 
     // misc signals
+    output logic                      pc_next,
     output logic                      if_busy_o,                // IF stage is busy fetching instr
     output logic                      perf_imiss_o              // instr fetch miss
 );
@@ -133,13 +134,15 @@ module ibex_if_stage #(
   // fetch address selection mux
   always_comb begin : fetch_addr_mux
     unique case (pc_mux_i)
-      PC_BOOT: fetch_addr_n = { boot_addr_i[31:8], 8'h80 };
+      PC_BOOT: fetch_addr_n = { boot_addr_i[31:8], 8'h00 };
       PC_JUMP: fetch_addr_n = jump_target_ex_i;
       PC_EXC:  fetch_addr_n = exc_pc;                       // set PC to exception handler
       PC_ERET: fetch_addr_n = csr_mepc_i;                   // restore PC when returning from EXC
       PC_DRET: fetch_addr_n = csr_depc_i;
       default: fetch_addr_n = 'X;
     endcase
+
+    pc_next = fetch_addr_n;
   end
 
   // prefetch buffer, caches a fixed number of instructions

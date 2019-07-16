@@ -532,7 +532,7 @@ module ibex_controller (
   assign instr_valid_clear_o = ~stall |  halt_id;
 
   // signal that ID stage has valid output
-  assign id_out_valid_o      = ~stall & instr_valid_i & ~special_req;
+  assign id_out_valid_o      = ~stall & instr_valid_i /*& ~special_req*/;
 
   // update registers
   always_ff @(posedge clk_i or negedge rst_ni) begin : update_regs

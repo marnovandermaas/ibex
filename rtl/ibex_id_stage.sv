@@ -282,7 +282,7 @@ module ibex_id_stage #(
 
   // Register file write enable mux - do not propagate illegal CSR ops, do not write when idle,
   // for loads/stores and multdiv operations write when the data is ready only
-  assign regfile_we = (illegal_csr_insn_i || !instr_executing) ? 1'b0          :
+  assign regfile_we = (illegal_csr_insn_i || !instr_executing || lsu_load_err_i) ? 1'b0          :
                       (data_req_dec || multdiv_en_dec)         ? regfile_we_wb : regfile_we_dec;
 
   // Register file write data mux
