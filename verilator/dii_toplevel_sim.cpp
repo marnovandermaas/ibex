@@ -224,8 +224,31 @@ int main(int argc, char** argv, char** env) {
                 out_count++;
             }
 
+            // detect imiss in order to replay instructions so they don't get lost
             if (top->perf_imiss_o && in_count > out_count) {
-                in_count = out_count + 1;
+                //std::cout << "imiss detected" << std::endl;
+                // this will need to be reworked
+                // currently, in order for this to work we need to remove illegal_insn from the assignment
+                // to rvfi_trap since when the core is first started the instruction data is garbage so
+                // this is high
+                if (top->rvfi_trap) {
+                    // if there has been a trap, then we know that we just tried to do a load/store
+                    // we need to go back to out_count
+                    in_count = out_count;
+                } else {
+                    //std::cout << "cmd: " << (instructions[out_count].dii_cmd ? "instr" : "rst") << std::endl;
+                    if (!instructions[out_count].dii_cmd) {
+                        // the last instruction we saw coming out was a reset
+                        // this means that we tried to do a jump straight away, and it will only come out of
+                        // the rvfi signals later. we need to go forward 2 places from the out_cout
+                        // (the jump has already been performed, so we want the instruction after it)
+                        in_count = out_count + 2;
+                    } else {
+                        // the last instruction was an actual instruction. we are doing a jump but it hasn't
+                        // come out of the rvfi signals yet so we need to skip it when replaying instructions
+                        in_count = out_count + 1;
+                    }
+                }
             }
 
             // perform instruction read
