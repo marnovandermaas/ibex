@@ -167,6 +167,7 @@ module ibex_prefetch_buffer #(
   // Update on a branch or as soon as a request is issued
   assign fetch_addr_en = branch_i | (valid_new_req & ~valid_req_q);
 
+  //TODO possibly make 31:2 -> 31:0
   assign fetch_addr_d = (branch_i ? addr_i : {fetch_addr_q[31:2], 2'b00}) +
                         // Current address + 4
                         {{29{1'b0}},(valid_new_req & ~valid_req_q),2'b00};

@@ -111,7 +111,16 @@ module ibex_fetch_fifo #(
   ////////////////////////////////////////
 
   always_comb begin
-    if (out_addr_o[1]) begin
+    // serve the aligned case even though the output address is unaligned when
+    // the next instruction will be from a hardware loop target
+    // in this case the current instruction is already prealigned in element 0
+    // TODO fix this
+    //      issue: this makes ibex assume that the next instruction is a
+    //          compressed one if the PC is a multiple of 2 regardless of
+    //          what the instruction that has been read in is
+    //      temp fix: comment out the test
+
+    if (0/*out_addr_o[1]*/) begin
       // unaligned case
       out_rdata_o     = rdata_unaligned;
       out_err_o       = err_unaligned;

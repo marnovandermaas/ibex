@@ -113,6 +113,7 @@ module ibex_if_stage import ibex_pkg::*; #(
   input  logic                        id_in_ready_i,            // ID stage is ready for new instr
 
   // misc signals
+  output logic                        pc_next,
   output logic                        pc_mismatch_alert_o,
   output logic                        if_busy_o                 // IF stage is busy fetching instr
 );
@@ -204,7 +205,7 @@ module ibex_if_stage import ibex_pkg::*; #(
   // fetch address selection mux
   always_comb begin : fetch_addr_mux
     unique case (pc_mux_internal)
-      PC_BOOT: fetch_addr_n = { boot_addr_i[31:8], 8'h80 };
+      PC_BOOT: fetch_addr_n = { boot_addr_i[31:8], 8'h00 };
       PC_JUMP: fetch_addr_n = branch_target_ex_i;
       PC_EXC:  fetch_addr_n = exc_pc;                       // set PC to exception handler
       PC_ERET: fetch_addr_n = csr_mepc_i;                   // restore PC when returning from EXC
@@ -214,6 +215,8 @@ module ibex_if_stage import ibex_pkg::*; #(
       PC_BP:   fetch_addr_n = BranchPredictor ? predict_branch_pc : { boot_addr_i[31:8], 8'h80 };
       default: fetch_addr_n = { boot_addr_i[31:8], 8'h80 };
     endcase
+
+    pc_next = fetch_addr_n;
   end
 
   // tell CS register file to initialize mtvec on boot
@@ -601,7 +604,6 @@ module ibex_if_stage import ibex_pkg::*; #(
 
     assign instr_skid_en = predict_branch_taken & ~pc_set_i & ~id_in_ready_i & ~instr_skid_valid_q;
 
-<<<<<<< HEAD
     assign instr_skid_valid_d = (instr_skid_valid_q & ~id_in_ready_i & ~stall_dummy_instr) |
                                 instr_skid_en;
 
@@ -610,29 +612,6 @@ module ibex_if_stage import ibex_pkg::*; #(
         instr_skid_valid_q <= 1'b0;
       end else begin
         instr_skid_valid_q <= instr_skid_valid_d;
-=======
-  // IF-ID pipeline registers, frozen when the ID stage is stalled
-  always_ff @(posedge clk_i or negedge rst_ni) begin : if_id_pipeline_regs
-    if (!rst_ni) begin
-      instr_new_id_o             <= 1'b0;
-      instr_valid_id_o           <= 1'b0;
-      instr_rdata_id_o           <= '0;
-      instr_rdata_c_id_o         <= '0;
-      instr_is_compressed_id_o   <= 1'b0;
-      illegal_c_insn_id_o        <= 1'b0;
-      pc_id_o                    <= '0;
-    end else begin
-      instr_new_id_o             <= if_valid_o;
-      if (if_valid_o) begin
-        instr_valid_id_o         <= 1'b1;
-        instr_rdata_id_o         <= instr_decompressed;
-        instr_rdata_c_id_o       <= fetch_rdata[15:0];
-        instr_is_compressed_id_o <= instr_is_compressed_int;
-        illegal_c_insn_id_o      <= illegal_c_insn;
-        pc_id_o                  <= pc_if_o;
-      end else if (instr_valid_clear_i) begin
-        instr_valid_id_o         <= 1'b0;
->>>>>>> Remove initial DII implementation
       end
     end
 
