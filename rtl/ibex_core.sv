@@ -81,6 +81,7 @@ module ibex_core #(
     output logic        rvfi_valid,
     output logic [63:0] rvfi_order,
     output logic [31:0] rvfi_insn,
+    output logic [31:0] rvfi_insn_uncompressed,
     output logic        rvfi_trap,
     output logic        rvfi_halt,
     output logic        rvfi_intr,
@@ -118,7 +119,6 @@ module ibex_core #(
   logic [15:0] instr_rdata_c_id;       // Compressed instruction sampled inside IF stage
   logic        instr_is_compressed_id;
   logic        illegal_c_insn_id;      // Illegal compressed instruction sent to ID stage
-  logic        illegal_insn_id;        // ID stage sees an illegal instruction
   logic [31:0] pc_if;                  // Program counter in IF stage
   logic [31:0] pc_id;                  // Program counter in ID stage
 
@@ -185,8 +185,6 @@ module ibex_core #(
   logic        id_in_ready;
   logic        ex_valid;
 
-  logic        if_id_pipe_reg_we;
-
   logic        lsu_data_valid;
 
   // Signals between instruction core interface and pipe (if and id stages)
@@ -221,12 +219,11 @@ module ibex_core #(
   logic        perf_store;
 
   // for RVFI
-  logic        id_out_valid, unused_id_out_valid;
+  logic        illegal_insn_id, unused_illegal_insn_id; // ID stage sees an illegal instruction
 
   // RISC-V Formal Interface signals
 `ifdef RVFI
-  logic [31:0] rvfi_insn_opcode;
-  logic        rvfi_valid_int;
+  logic [31:0] rvfi_insn_id;
   logic [4:0]  rvfi_rs1_addr_id;
   logic [4:0]  rvfi_rs2_addr_id;
   logic [31:0] rvfi_rs1_data_d;
@@ -244,11 +241,6 @@ module ibex_core #(
   logic        rvfi_rd_we_id;
   logic        rvfi_insn_new_d;
   logic        rvfi_insn_new_q;
-  logic        rvfi_insn_clear_d;
-  logic        rvfi_insn_clear_q;
-  logic        rvfi_changed_insn;
-  logic        rvfi_changed_pc;
-  logic [31:0] rvfi_pc_id_q;
   logic [3:0]  rvfi_mem_mask_int;
   logic [31:0] rvfi_mem_rdata_d;
   logic [31:0] rvfi_mem_rdata_q;
@@ -346,7 +338,6 @@ module ibex_core #(
 
       // pipeline stalls
       .id_in_ready_i            ( id_in_ready            ),
-      .if_id_pipe_reg_we_o      ( if_id_pipe_reg_we      ),
 
       .pc_next                  ( pc_next                ),
       .if_busy_o                ( if_busy                ),
@@ -399,8 +390,6 @@ module ibex_core #(
       // Stalls
       .ex_valid_i                   ( ex_valid               ),
       .lsu_valid_i                  ( lsu_data_valid         ),
-
-      .id_out_valid_o               ( id_out_valid           ),
 
       .alu_operator_ex_o            ( alu_operator_ex        ),
       .alu_operand_a_ex_o           ( alu_operand_a_ex       ),
@@ -476,7 +465,7 @@ module ibex_core #(
   );
 
   // for RVFI only
-  assign unused_id_out_valid = id_out_valid;
+  assign unused_illegal_insn_id = illegal_insn_id;
 
   ibex_ex_block #(
       .RV32M ( RV32M )
@@ -621,33 +610,57 @@ module ibex_core #(
   );
 
 `ifdef RVFI
-  always_ff @(posedge clk) begin
-    rvfi_halt      <= '0;
-    rvfi_trap      <= lsu_store_err || lsu_load_err;
-    rvfi_intr      <= irq_ack_o;
-    rvfi_order     <= rst_ni ? rvfi_order + rvfi_valid : '0;
-    rvfi_insn      <= rvfi_insn_opcode;
-    rvfi_mode      <= PRIV_LVL_M;
-    rvfi_rs1_addr  <= rvfi_rs1_addr_id;
-    rvfi_rs2_addr  <= rvfi_rs2_addr_id;
-    rvfi_pc_rdata  <= pc_id;
-    rvfi_mem_rmask <= rvfi_mem_mask_int;
-    rvfi_mem_wmask <= data_we_o ? rvfi_mem_mask_int : 4'b0000;
-    rvfi_valid     <= instr_ret;
-    rvfi_rs1_rdata <= rvfi_rs1_data_d;
-    rvfi_rs2_rdata <= rvfi_rs2_data_d;
-    rvfi_pc_wdata  <= (pc_set || lsu_load_err || lsu_store_err) ? (pc_mux_id == 3'b001 ? jump_target_ex : pc_next) : pc_if;
+  always_ff @(posedge clk or negedge rst_ni) begin
+    if (!rst_ni) begin
+      rvfi_halt              <= '0;
+      rvfi_trap              <= '0;
+      rvfi_intr              <= '0;
+      rvfi_order             <= '0;
+      rvfi_insn              <= '0;
+      rvfi_insn_uncompressed <= '0;
+      rvfi_mode              <= '0;
+      rvfi_rs1_addr          <= '0;
+      rvfi_rs2_addr          <= '0;
+      rvfi_pc_rdata          <= '0;
+      rvfi_pc_wdata          <= '0;
+      rvfi_mem_rmask         <= '0;
+      rvfi_mem_wmask         <= '0;
+      rvfi_valid             <= '0;
+      rvfi_rs1_rdata         <= '0;
+      rvfi_rs2_rdata         <= '0;
+      rvfi_rd_wdata          <= '0;
+      rvfi_rd_addr           <= '0;
+      rvfi_mem_rdata         <= '0;
+      rvfi_mem_wdata         <= '0;
+      rvfi_mem_addr          <= '0;
+    end else begin
+      rvfi_halt              <= '0;
+      rvfi_trap      <= lsu_store_err || lsu_load_err;
+      rvfi_intr              <= irq_ack_o;
+      rvfi_order             <= rvfi_order + rvfi_valid;
+      rvfi_insn              <= rvfi_insn_id;
+      rvfi_insn_uncompressed <= instr_rdata_id;
+      rvfi_mode              <= PRIV_LVL_M; // TODO: Update for user mode support
+      rvfi_rs1_addr          <= rvfi_rs1_addr_id;
+      rvfi_rs2_addr          <= rvfi_rs2_addr_id;
+      rvfi_pc_rdata          <= pc_id;
+      rvfi_pc_wdata  <= (pc_set || lsu_load_err || lsu_store_err) ? (pc_mux_id == 3'b001 ? jump_target_ex : pc_next) : pc_if;
+      rvfi_mem_rmask         <= rvfi_mem_mask_int;
+      rvfi_mem_wmask         <= data_we_o ? rvfi_mem_mask_int : 4'b0000;
+      rvfi_valid             <= instr_ret;
+      rvfi_rs1_rdata         <= rvfi_rs1_data_d;
+      rvfi_rs2_rdata         <= rvfi_rs2_data_d;
+      rvfi_rd_wdata          <= rvfi_rd_wdata_d;
+      rvfi_rd_addr           <= rvfi_rd_addr_d;
+      rvfi_mem_rdata         <= rvfi_mem_rdata_d;
+      rvfi_mem_wdata         <= rvfi_mem_wdata_d;
+      rvfi_mem_addr          <= rvfi_mem_addr_d;
+    end
   end
-
-  assign rvfi_rd_wdata  = rvfi_rd_wdata_q;
-  assign rvfi_rd_addr   = rvfi_rd_addr_q;
-  assign rvfi_mem_rdata = rvfi_mem_rdata_q;
-  assign rvfi_mem_wdata = rvfi_mem_wdata_q;
-  assign rvfi_mem_addr  = rvfi_mem_addr_q;
 
   // Keep the mem data stable for each instruction cycle
   always_comb begin
-    if (rvfi_insn_new_d) begin
+    if (rvfi_insn_new_d && lsu_data_valid) begin
       rvfi_mem_addr_d  = alu_adder_result_ex;
       rvfi_mem_rdata_d = regfile_wdata_lsu;
       rvfi_mem_wdata_d = data_wdata_ex;
@@ -657,10 +670,16 @@ module ibex_core #(
       rvfi_mem_wdata_d = rvfi_mem_wdata_q;
     end
   end
-  always_ff @(posedge clk) begin
-    rvfi_mem_addr_q  <= rvfi_mem_addr_d;
-    rvfi_mem_rdata_q <= rvfi_mem_rdata_d;
-    rvfi_mem_wdata_q <= rvfi_mem_wdata_d;
+  always_ff @(posedge clk or negedge rst_ni) begin
+    if (!rst_ni) begin
+      rvfi_mem_addr_q  <= '0;
+      rvfi_mem_rdata_q <= '0;
+      rvfi_mem_wdata_q <= '0;
+    end else begin
+      rvfi_mem_addr_q  <= rvfi_mem_addr_d;
+      rvfi_mem_rdata_q <= rvfi_mem_rdata_d;
+      rvfi_mem_wdata_q <= rvfi_mem_wdata_d;
+    end
   end
   // Byte enable based on data type
   always_comb begin
@@ -672,19 +691,17 @@ module ibex_core #(
     endcase
   end
 
-  assign rvfi_valid_int = id_out_valid && if_id_pipe_reg_we && !illegal_c_insn_id;
-
   always_comb begin
     if (instr_is_compressed_id) begin
-      rvfi_insn_opcode = {16'b0, instr_rdata_c_id};
+      rvfi_insn_id = {16'b0, instr_rdata_c_id};
     end else begin
-      rvfi_insn_opcode = instr_rdata_id;
+      rvfi_insn_id = instr_rdata_id;
     end
   end
 
   // Source register data are kept stable for each instruction cycle
   always_comb begin
-    if (rvfi_insn_new_d) begin
+    if (instr_new_id) begin
       rvfi_rs1_data_d = rvfi_rs1_data_id;
       rvfi_rs2_data_d = rvfi_rs2_data_id;
     end else begin
@@ -692,9 +709,14 @@ module ibex_core #(
       rvfi_rs2_data_d = rvfi_rs2_data_q;
     end
   end
-  always_ff @(posedge clk) begin
-    rvfi_rs1_data_q <= rvfi_rs1_data_d;
-    rvfi_rs2_data_q <= rvfi_rs2_data_d;
+  always_ff @(posedge clk or negedge rst_ni) begin
+    if (!rst_ni) begin
+      rvfi_rs1_data_q <= '0;
+      rvfi_rs2_data_q <= '0;
+    end else begin
+      rvfi_rs1_data_q <= rvfi_rs1_data_d;
+      rvfi_rs2_data_q <= rvfi_rs2_data_d;
+    end
   end
 
   // RD write register is refreshed only once per cycle and
@@ -704,7 +726,6 @@ module ibex_core #(
       if (!rvfi_rd_we_id) begin
         rvfi_rd_addr_d    = '0;
         rvfi_rd_wdata_d   = '0;
-        rvfi_insn_clear_d = 1'b0;
       end else begin
         rvfi_rd_addr_d = rvfi_rd_addr_id;
         if (!rvfi_rd_addr_id) begin
@@ -712,43 +733,41 @@ module ibex_core #(
         end else begin
           rvfi_rd_wdata_d = rvfi_rd_wdata_id;
         end
-        rvfi_insn_clear_d = 1'b1;
       end
     end else begin
       rvfi_rd_addr_d    = rvfi_rd_addr_q;
       rvfi_rd_wdata_d   = rvfi_rd_wdata_q;
-      rvfi_insn_clear_d = 1'b0;
     end
   end
-  always_ff @(posedge clk) begin
-    rvfi_insn_clear_q <= rvfi_insn_clear_d;
-    rvfi_rd_addr_q    <= rvfi_rd_addr_d;
-    rvfi_rd_wdata_q   <= rvfi_rd_wdata_d;
+  always_ff @(posedge clk or negedge rst_ni) begin
+    if (!rst_ni) begin
+      rvfi_rd_addr_q    <= '0;
+      rvfi_rd_wdata_q   <= '0;
+    end else begin
+      rvfi_rd_addr_q    <= rvfi_rd_addr_d;
+      rvfi_rd_wdata_q   <= rvfi_rd_wdata_d;
+    end
   end
 
-  // New instruction signalling based on changes of
-  // instruction data, program counter and valid signal
   always_comb begin
-    if (rvfi_changed_insn || rvfi_changed_pc || rvfi_valid ) begin
+    if (instr_new_id) begin
       rvfi_insn_new_d = 1'b1;
-    end else if (rvfi_insn_clear_q) begin
-      rvfi_insn_new_d = 1'b0;
     end else begin
       rvfi_insn_new_d = rvfi_insn_new_q;
     end
   end
-  always_ff @(posedge clk) begin
-    rvfi_insn_new_q <= rvfi_insn_new_d;
+  always_ff @(posedge clk or negedge rst_ni) begin
+    if (!rst_ni) begin
+      rvfi_insn_new_q <= 1'b0;
+    end else begin
+      if (instr_ret) begin
+        rvfi_insn_new_q <= 1'b0;
+      end else begin
+        rvfi_insn_new_q <= rvfi_insn_new_d;
+      end
+    end
   end
 
-  // Change in instruction code
-  assign rvfi_changed_insn = rvfi_insn != rvfi_insn_opcode;
-
-  // Change in program counter
-  always_ff @(posedge clk) begin
-    rvfi_pc_id_q <= pc_id;
-  end
-  assign rvfi_changed_pc = rvfi_pc_id_q != pc_id;
 `endif
 
 endmodule

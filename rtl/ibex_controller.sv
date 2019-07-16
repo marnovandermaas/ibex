@@ -101,8 +101,6 @@ module ibex_controller (
     input  logic                      stall_jump_i,
     input  logic                      stall_branch_i,
 
-    output logic                      id_out_valid_o,        // ID stage has valid output
-
     // performance monitors
     output logic                      perf_jump_o,           // we are executing a jump
                                                              // instruction (j, jr, jal, jalr)
@@ -358,24 +356,24 @@ module ibex_controller (
       DBG_TAKEN_IF: begin
         // enter debug mode and save PC in IF to dpc
         // jump to debug exception handler in debug memory
-        pc_mux_o         = PC_EXC;
-        pc_set_o         = 1'b1;
-        exc_pc_mux_o     = EXC_PC_DBD;
+        if (debug_single_step_i || debug_req_i) begin
+          pc_mux_o         = PC_EXC;
+          pc_set_o         = 1'b1;
+          exc_pc_mux_o     = EXC_PC_DBD;
 
-        csr_save_if_o    = 1'b1;
-        debug_csr_save_o = 1'b1;
+          csr_save_if_o    = 1'b1;
+          debug_csr_save_o = 1'b1;
 
-        csr_save_cause_o = 1'b1;
-        if (debug_single_step_i) begin
-          debug_cause_o = DBG_CAUSE_STEP;
-        end else if (debug_req_i) begin
-          debug_cause_o = DBG_CAUSE_HALTREQ;
-        end else if (ebrk_insn_i) begin
-          debug_cause_o = DBG_CAUSE_EBREAK;
+          csr_save_cause_o = 1'b1;
+          if (debug_single_step_i) begin
+            debug_cause_o = DBG_CAUSE_STEP;
+          end else begin
+            debug_cause_o = DBG_CAUSE_HALTREQ;
+          end
+
+          // enter debug mode
+          debug_mode_d = 1'b1;
         end
-
-        // enter debug mode
-        debug_mode_d = 1'b1;
 
         ctrl_fsm_ns  = DECODE;
       end
@@ -389,29 +387,31 @@ module ibex_controller (
         //
         // for 1. do not update dcsr and dpc, for 2. and 3. do so [Debug Spec v0.13.2, p.39]
         // jump to debug exception handler in debug memory
-        pc_mux_o     = PC_EXC;
-        pc_set_o     = 1'b1;
-        exc_pc_mux_o = EXC_PC_DBD;
+        if (ebrk_insn_i || debug_req_i) begin
+          pc_mux_o     = PC_EXC;
+          pc_set_o     = 1'b1;
+          exc_pc_mux_o = EXC_PC_DBD;
 
-        // update dcsr and dpc
-        if ((ebrk_insn_i && debug_ebreakm_i && !debug_mode_q) || // ebreak with forced entry
-            (enter_debug_mode)) begin // halt request
+          // update dcsr and dpc
+          if ((ebrk_insn_i && debug_ebreakm_i && !debug_mode_q) || // ebreak with forced entry
+              (enter_debug_mode)) begin // halt request
 
-          // dpc (set to the address of the EBREAK, i.e. set to PC in ID stage)
-          csr_save_cause_o = 1'b1;
-          csr_save_id_o    = 1'b1;
+            // dpc (set to the address of the EBREAK, i.e. set to PC in ID stage)
+            csr_save_cause_o = 1'b1;
+            csr_save_id_o    = 1'b1;
 
-          // dcsr
-          debug_csr_save_o = 1'b1;
-          if (debug_req_i) begin
-            debug_cause_o = DBG_CAUSE_HALTREQ;
-          end else if (ebrk_insn_i) begin
-            debug_cause_o = DBG_CAUSE_EBREAK;
+            // dcsr
+            debug_csr_save_o = 1'b1;
+            if (debug_req_i) begin
+              debug_cause_o = DBG_CAUSE_HALTREQ;
+            end else begin
+              debug_cause_o = DBG_CAUSE_EBREAK;
+            end
           end
-        end
 
-        // enter debug mode
-        debug_mode_d = 1'b1;
+          // enter debug mode
+          debug_mode_d = 1'b1;
+        end
 
         ctrl_fsm_ns  = DECODE;
       end
@@ -530,9 +530,6 @@ module ibex_controller (
   // kill instr in IF-ID pipeline reg that are done, or if a
   // multicycle instr causes an exception for example
   assign instr_valid_clear_o = ~stall |  halt_id;
-
-  // signal that ID stage has valid output
-  assign id_out_valid_o      = ~stall & instr_valid_i /*& ~special_req*/;
 
   // update registers
   always_ff @(posedge clk_i or negedge rst_ni) begin : update_regs
