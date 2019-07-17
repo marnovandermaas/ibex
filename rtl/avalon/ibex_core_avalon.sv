@@ -222,6 +222,7 @@ module ibex_core_avalon #(
         .rvfi_valid     (rvfi_valid),
         .rvfi_order     (rvfi_order),
         .rvfi_insn      (rvfi_insn),
+        .rvfi_insn_uncompressed (),
         .rvfi_trap      (rvfi_trap),
         .rvfi_halt      (rvfi_halt),
         .rvfi_intr      (rvfi_intr),
