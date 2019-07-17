@@ -40,7 +40,8 @@ verilator-trace:
 	verilator +define+RVFI +define+DII -DTRACE -Wno-WIDTH -Wno-UNOPTFLAT --trace --cc $(FILELIST) --exe $(SIMFILE) $(LIBS)
 
 compile:
-	make -j -C obj_dir -f V$(TARGET).mk V$(TARGET)
+	make -j -C obj_dir -f V$(TARGET).mk V$(TARGET) CFG_CXXFLAGS_NO_UNUSED="-std=gnu++11 -Wno-sign-compare -Wno-uninitialized -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable -Wno-shadow"
+
 
 clean:
 	$(RM) -r obj_dir
