@@ -101,7 +101,7 @@ module ibex_cs_registers #(
     | (0          << 13)  // N - User level interrupts supported
     | (0          << 18)  // S - Supervisor mode implemented
     | (0          << 20)  // U - User mode implemented
-    | (0          << 23)  // X - Non-standard extensions present
+    | (1          << 23)  // X - Non-standard extensions present
     | (32'(MXL)   << 30); // M-XLEN
 
   `define MSTATUS_UIE_BITS        0

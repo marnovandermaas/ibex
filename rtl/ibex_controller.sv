@@ -20,6 +20,8 @@
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
 
+`define EXCEPTION_SIZE 22
+
 /**
  * Main controller of the processor
  */
@@ -62,6 +64,11 @@ module ibex_controller (
     input  logic                      load_err_i,
     input  logic                      store_err_i,
 
+    // CHERI exception signals
+    input logic cheri_exc_i,
+    //input  logic [`EXCEPTION_SIZE-1:0] cheri_exc_a_i,
+    //input  logic [`EXCEPTION_SIZE-1:0] cheri_exc_b_i,
+
     // jump/branch signals
     input  logic                      branch_set_i,          // branch taken set signal
     input  logic                      jump_set_i,            // jump taken set signal
@@ -100,6 +107,7 @@ module ibex_controller (
     input  logic                      stall_multdiv_i,
     input  logic                      stall_jump_i,
     input  logic                      stall_branch_i,
+    input logic stall_cheri_exc_i,
 
     // performance monitors
     output logic                      perf_jump_o,           // we are executing a jump
@@ -152,7 +160,7 @@ module ibex_controller (
   assign store_err_d = store_err_i;
 
   // exception requests
-  assign exc_req     = ecall_insn_i | ebrk_insn_i | illegal_insn_i;
+  assign exc_req     = ecall_insn_i | ebrk_insn_i | illegal_insn_i | cheri_exc_i;
 
   // LSU exception requests
   assign exc_req_lsu = store_err_i | load_err_i;
@@ -475,6 +483,10 @@ module ibex_controller (
               exc_cause_o      = EXC_CAUSE_BREAKPOINT;
             end
 
+          // deal with CHERI exceptions
+          end else if (cheri_exc_i) begin
+            pc_set_o = 1'b1;
+
           end else if (store_err_q) begin
             exc_cause_o = EXC_CAUSE_STORE_ACCESS_FAULT;
             csr_mtval_o = lsu_addr_last_i;
@@ -522,7 +534,7 @@ module ibex_controller (
   // if high, current instr needs at least one more cycle to finish after the current cycle
   // if low, current instr finishes in current cycle
   // multicycle instructions have this set except during the last cycle
-  assign stall = stall_lsu_i | stall_multdiv_i | stall_jump_i | stall_branch_i;
+  assign stall = stall_lsu_i | stall_multdiv_i | stall_jump_i | stall_branch_i | stall_cheri_exc_i;
 
   // signal to IF stage that ID stage is ready for next instr
   assign id_in_ready_o       = ~stall & ~halt_if;

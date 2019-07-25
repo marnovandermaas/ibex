@@ -20,6 +20,11 @@
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
 
+
+// TODO put these in the makefile
+`define ALMIGHTY 93'h100000000003FFDF690003F0
+`define NULLCAP 93'h000000000000001F690003F0
+
 /**
  * RISC-V register file
  *
@@ -29,7 +34,7 @@
  */
 module ibex_register_file #(
     parameter bit RV32E              = 0,
-    parameter int unsigned DataWidth = 32
+    parameter int unsigned DataWidth = 93
 ) (
     // Clock and Reset
     input  logic                 clk_i,
@@ -67,9 +72,14 @@ module ibex_register_file #(
   end
 
   // loop from 1 to NUM_WORDS-1 as R0 is nil
+  //always_ff @(posedge clk_i or negedge rst_ni) begin
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      rf_reg_tmp <= '{default:'0};
+      //rf_reg_tmp <= '{default:'0};
+      for (int i = 0; i < NUM_WORDS; i++) begin
+        // TODO this should be initialized to the null cap for synthesis
+        rf_reg_tmp[i] <= `ALMIGHTY;
+      end
     end else begin
       for (int r = 1; r < NUM_WORDS; r++) begin
         if (we_a_dec[r]) rf_reg_tmp[r] <= wdata_a_i;
@@ -78,7 +88,7 @@ module ibex_register_file #(
   end
 
   // R0 is nil
-  assign rf_reg[0] = '0;
+  assign rf_reg[0] = `NULLCAP;
   assign rf_reg[NUM_WORDS-1:1] = rf_reg_tmp[NUM_WORDS-1:1];
 
   assign rdata_a_o = rf_reg[raddr_a_i];

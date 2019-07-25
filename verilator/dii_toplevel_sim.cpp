@@ -119,6 +119,8 @@ int main(int argc, char** argv, char** env) {
          
     top->rst_i = 0;
 
+    top->eval();
+
     int received = 0;
     int in_count = 0;
     int out_count = 0;
@@ -132,7 +134,7 @@ int main(int argc, char** argv, char** env) {
         // send back execution trace
         // send back execution trace if the number of instructions that have come out is equal to the
         // number that have gone in
-        //std::cout << "send" << std::endl;
+        std::cout << "send" << std::endl;
         if (returntrace.size() > 0 && out_count == in_count) {
             for (int i = 0; i < returntrace.size(); i++) {
                 // loop to make sure that the packet has been properly sent
@@ -149,9 +151,9 @@ int main(int argc, char** argv, char** env) {
         // set up a packet and try to receive packets if the number of instructions that we've put in is
         // equal to the number of instructions we've received from TestRIG
         RVFI_DII_Instruction_Packet *packet;
-        //std::cout << "receive" << std::endl;
+        std::cout << "receive" << std::endl;
         while (in_count >= received) {
-            //std::cout << "in_count: " << in_count << " received: " << received << std::endl;
+            std::cout << "in_count: " << in_count << " received: " << received << std::endl;
 
             // try to receive a packet
             serv_socket_getN((unsigned int *) recbuf, socket, sizeof(RVFI_DII_Instruction_Packet));
@@ -200,15 +202,15 @@ int main(int argc, char** argv, char** env) {
             if (in_count - out_count > 0 && top->rvfi_valid) {
                 RVFI_DII_Execution_Packet execpacket = {
                     .rvfi_order = top->rvfi_order,
-                    .rvfi_pc_rdata = top->rvfi_pc_rdata | ((top->rvfi_pc_rdata & 0x80000000) ? 0xffffffff00000000 : 0),
-                    .rvfi_pc_wdata = top->rvfi_pc_wdata | ((top->rvfi_pc_wdata & 0x80000000) ? 0xffffffff00000000 : 0),
-                    .rvfi_insn = top->rvfi_insn | ((top->rvfi_insn & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_rs1_data = top->rvfi_rs1_rdata | ((top->rvfi_rs1_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_rs2_data = top->rvfi_rs2_rdata | ((top->rvfi_rs2_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_rd_wdata = top->rvfi_rd_wdata | ((top->rvfi_rd_wdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_mem_addr = top->rvfi_mem_addr | ((top->rvfi_mem_addr & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_mem_rdata = top->rvfi_mem_rdata | ((top->rvfi_mem_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_mem_wdata = top->rvfi_mem_wdata | ((top->rvfi_mem_wdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
+                    .rvfi_pc_rdata = top->rvfi_pc_rdata,// | ((top->rvfi_pc_rdata & 0x80000000) ? 0xffffffff00000000 : 0),
+                    .rvfi_pc_wdata = top->rvfi_pc_wdata,// | ((top->rvfi_pc_wdata & 0x80000000) ? 0xffffffff00000000 : 0),
+                    .rvfi_insn = top->rvfi_insn,// | ((top->rvfi_insn & 0x80000000) ? 0xffffffff00000000 : 0 ),
+                    .rvfi_rs1_data = top->rvfi_rs1_rdata,// | ((top->rvfi_rs1_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
+                    .rvfi_rs2_data = top->rvfi_rs2_rdata,// | ((top->rvfi_rs2_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
+                    .rvfi_rd_wdata = top->rvfi_rd_wdata,// | ((top->rvfi_rd_wdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
+                    .rvfi_mem_addr = top->rvfi_mem_addr,// | ((top->rvfi_mem_addr & 0x80000000) ? 0xffffffff00000000 : 0 ),
+                    .rvfi_mem_rdata = top->rvfi_mem_rdata,// | ((top->rvfi_mem_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
+                    .rvfi_mem_wdata = top->rvfi_mem_wdata,// | ((top->rvfi_mem_wdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
                     .rvfi_mem_rmask = top->rvfi_mem_rmask,
                     .rvfi_mem_wmask = top->rvfi_mem_wmask,
                     .rvfi_rs1_addr = top->rvfi_rs1_addr,
@@ -234,7 +236,9 @@ int main(int argc, char** argv, char** env) {
                 if (top->rvfi_trap) {
                     // if there has been a trap, then we know that we just tried to do a load/store
                     // we need to go back to out_count
-                    in_count = out_count;
+                    // THIS BREAKS ONCE CHERI IS ADDED
+                    // CHERI USES THE TRAP SIGNAL A LOT BUT ITS TRAPS TAKE FEWER CYCLES TO RECOVER FROM
+                    in_count = out_count + ((top->rvfi_insn & 0x0000007f) == 0x0000005b ? 1 : 0);
                 } else {
                     //std::cout << "cmd: " << (instructions[out_count].dii_cmd ? "instr" : "rst") << std::endl;
                     if (!instructions[out_count].dii_cmd) {
@@ -292,15 +296,15 @@ int main(int argc, char** argv, char** env) {
             if (in_count - out_count > 0 && top->rst_i) {
                 RVFI_DII_Execution_Packet execpacket = {
                     .rvfi_order = top->rvfi_order,
-                    .rvfi_pc_rdata = top->rvfi_pc_rdata | ((top->rvfi_pc_rdata & 0x80000000) ? 0xffffffff00000000 : 0),
-                    .rvfi_pc_wdata = top->rvfi_pc_wdata | ((top->rvfi_pc_wdata & 0x80000000) ? 0xffffffff00000000 : 0),
-                    .rvfi_insn = top->rvfi_insn | ((top->rvfi_insn & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_rs1_data = top->rvfi_rs1_rdata | ((top->rvfi_rs1_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_rs2_data = top->rvfi_rs2_rdata | ((top->rvfi_rs2_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_rd_wdata = top->rvfi_rd_wdata | ((top->rvfi_rd_wdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_mem_addr = top->rvfi_mem_addr | ((top->rvfi_mem_addr & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_mem_rdata = top->rvfi_mem_rdata | ((top->rvfi_mem_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_mem_wdata = top->rvfi_mem_wdata | ((top->rvfi_mem_wdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
+                    .rvfi_pc_rdata = top->rvfi_pc_rdata,// | ((top->rvfi_pc_rdata & 0x80000000) ? 0xffffffff00000000 : 0),
+                    .rvfi_pc_wdata = top->rvfi_pc_wdata,// | ((top->rvfi_pc_wdata & 0x80000000) ? 0xffffffff00000000 : 0),
+                    .rvfi_insn = top->rvfi_insn,// | ((top->rvfi_insn & 0x80000000) ? 0xffffffff00000000 : 0 ),
+                    .rvfi_rs1_data = top->rvfi_rs1_rdata,// | ((top->rvfi_rs1_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
+                    .rvfi_rs2_data = top->rvfi_rs2_rdata,// | ((top->rvfi_rs2_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
+                    .rvfi_rd_wdata = top->rvfi_rd_wdata,// | ((top->rvfi_rd_wdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
+                    .rvfi_mem_addr = top->rvfi_mem_addr,// | ((top->rvfi_mem_addr & 0x80000000) ? 0xffffffff00000000 : 0 ),
+                    .rvfi_mem_rdata = top->rvfi_mem_rdata,// | ((top->rvfi_mem_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
+                    .rvfi_mem_wdata = top->rvfi_mem_wdata,// | ((top->rvfi_mem_wdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
                     .rvfi_mem_rmask = top->rvfi_mem_rmask,
                     .rvfi_mem_wmask = top->rvfi_mem_wmask,
                     .rvfi_rs1_addr = top->rvfi_rs1_addr,

@@ -20,6 +20,8 @@
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
 
+`define CAP_SIZE 93
+
 /**
  * Instruction Fetch Stage
  *
@@ -54,8 +56,8 @@ module ibex_if_stage #(
                                                                 // is a compressed instr
     output logic                      illegal_c_insn_id_o,      // compressed decoder thinks this
                                                                 // is an invalid instr
-    output logic [31:0]               pc_if_o,
-    output logic [31:0]               pc_id_o,
+    output logic [`CAP_SIZE-1:0]               pc_if_o,
+    output logic [`CAP_SIZE-1:0]               pc_id_o,
 
     // Forwarding ports - control signals
     input  logic                      instr_valid_clear_i,      // clear instr valid bit in IF-ID
@@ -79,7 +81,7 @@ module ibex_if_stage #(
     input  logic                      id_in_ready_i,            // ID stage is ready for new instr
 
     // misc signals
-    output logic                      pc_next,
+    output logic [`CAP_SIZE-1:0]               pc_next,
     output logic                      if_busy_o,                // IF stage is busy fetching instr
     output logic                      perf_imiss_o              // instr fetch miss
 );
@@ -92,14 +94,14 @@ module ibex_if_stage #(
   // prefetch buffer related signals
   logic              prefetch_busy;
   logic              branch_req;
-  logic       [31:0] fetch_addr_n;
+  logic       [`CAP_SIZE-1:0] fetch_addr_n;
 
   logic              fetch_valid;
   logic              fetch_ready;
   logic       [31:0] fetch_rdata;
-  logic       [31:0] fetch_addr;
+  logic       [`CAP_SIZE-1:0] fetch_addr;
 
-  logic       [31:0] exc_pc;
+  logic       [`CAP_SIZE-1:0] exc_pc;
 
   logic        [5:0] irq_id;
   logic              unused_irq_bit;
@@ -129,6 +131,7 @@ module ibex_if_stage #(
   end
 
   // fetch address selection mux
+  // TODO change to capability stuff
   always_comb begin : fetch_addr_mux
     unique case (pc_mux_i)
       PC_BOOT: fetch_addr_n = { boot_addr_i[31:8], 8'h00 };

@@ -14,6 +14,9 @@
 //                 long critical paths to the instruction cache               //
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
+
+`define CAP_SIZE 93
+
 /**
  * Prefetcher Buffer for 32 bit memory interface
  *
@@ -27,19 +30,19 @@ module ibex_prefetch_buffer (
     input  logic        req_i,
 
     input  logic        branch_i,
-    input  logic [31:0] addr_i,
+    input  logic [`CAP_SIZE-1:0] addr_i,
 
 
     input  logic        ready_i,
     output logic        valid_o,
     output logic [31:0] rdata_o,
-    output logic [31:0] addr_o,
+    output logic [`CAP_SIZE:0] addr_o,
 
 
     // goes to instruction memory / instruction cache
     output logic        instr_req_o,
     input  logic        instr_gnt_i,
-    output logic [31:0] instr_addr_o,
+    output logic [`CAP_SIZE:0] instr_addr_o,
     input  logic [31:0] instr_rdata_i,
     input  logic        instr_rvalid_i,
 
@@ -53,8 +56,8 @@ module ibex_prefetch_buffer (
 
   pf_fsm_e pf_fsm_cs, pf_fsm_ns;
 
-  logic [31:0] instr_addr_q, fetch_addr;
-  logic [31:0] instr_addr, instr_addr_w_aligned;
+  logic [`CAP_SIZE-1:0] instr_addr_q, fetch_addr;
+  logic [`CAP_SIZE-1:0] instr_addr, instr_addr_w_aligned;
   logic        addr_valid;
 
   logic        fifo_valid;
@@ -97,6 +100,7 @@ module ibex_prefetch_buffer (
   ////////////////
 
   //assign fetch_addr = {instr_addr_q[31:2], 2'b00} + 32'd4;
+  // TODO pcc stuff
   assign fetch_addr = {instr_addr_q[31:0]} + 32'd4;
   assign fifo_clear = branch_i;
 
@@ -227,6 +231,7 @@ module ibex_prefetch_buffer (
   /////////////////
   // Output Addr //
   /////////////////
+  // TODO pcc stuff
   assign instr_addr_w_aligned = {instr_addr[31:2], 2'b00};
   assign instr_addr_o         =  instr_addr_w_aligned;
 

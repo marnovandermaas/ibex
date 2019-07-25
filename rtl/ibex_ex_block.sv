@@ -21,6 +21,9 @@
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
 
+`define CAP_SIZE 93
+`define EXCEPTION_SIZE 22
+
 /**
  * Execution stage
  *
@@ -45,9 +48,24 @@ module ibex_ex_block #(
     input  logic [31:0]           multdiv_operand_a_i,
     input  logic [31:0]           multdiv_operand_b_i,
 
+    // CHERI
+    input logic                     cheri_en_i,
+    input ibex_defines::cheri_base_opcode_e       cheri_base_opcode_i,
+    input ibex_defines::cheri_threeop_funct7_e    cheri_threeop_opcode_i,
+    input ibex_defines::cheri_store_funct5_e      cheri_store_opcode_i,
+    input ibex_defines::cheri_load_funct5_e       cheri_load_opcode_i,
+    input ibex_defines::cheri_s_a_d_funct5_e      cheri_sad_opcode_i,
+    input logic [`CAP_SIZE-1:0]      cheri_operand_a_i,
+    input logic [`CAP_SIZE-1:0]      cheri_operand_b_i,
+
+    output logic [`EXCEPTION_SIZE-1:0] cheri_exc_a_o,
+    output logic [`EXCEPTION_SIZE-1:0] cheri_exc_b_o,
+    output logic                  cheri_wrote_cap_o,
+
     // Outputs
     output logic [31:0]           alu_adder_result_ex_o, // to LSU
-    output logic [31:0]           regfile_wdata_ex_o,
+    // TODO should this be CAP_SIZE or should i have a separate signal?
+    output logic [`CAP_SIZE-1:0]           regfile_wdata_ex_o,
     output logic [31:0]           jump_target_o,         // to IF
     output logic                  branch_decision_o,     // to ID
 
@@ -65,6 +83,13 @@ module ibex_ex_block #(
   logic        alu_cmp_result, alu_is_equal_result;
   logic        multdiv_valid, multdiv_en_sel;
   logic        multdiv_en;
+
+  logic [`CAP_SIZE-1:0] cheri_result;
+
+  logic [`EXCEPTION_SIZE-1:0] cheri_exc_a;
+  logic [`EXCEPTION_SIZE-1:0] cheri_exc_b;
+  assign cheri_exc_a_o = cheri_en_i ? cheri_exc_a : '0;
+  assign cheri_exc_b_o = cheri_en_i ? cheri_exc_b : '0;
 
   /*
     The multdiv_i output is never selected if RV32M=0
@@ -88,11 +113,14 @@ module ibex_ex_block #(
     endgenerate
   `endif
 
-  assign regfile_wdata_ex_o = multdiv_en ? multdiv_result : alu_result;
+  // TODO change
+  assign regfile_wdata_ex_o = multdiv_en ? multdiv_result
+                            : cheri_en_i ? cheri_result
+                            :              alu_result;
 
   // branch handling
   assign branch_decision_o  = alu_cmp_result;
-  assign jump_target_o      = alu_adder_result_ex_o;
+  assign jump_target_o      = cheri_en_i ? cheri_jump_addr : alu_adder_result_ex_o;
 
   /////////
   // ALU //
@@ -110,6 +138,28 @@ module ibex_ex_block #(
       .result_o            ( alu_result                ),
       .comparison_result_o ( alu_cmp_result            ),
       .is_equal_result_o   ( alu_is_equal_result       )
+  );
+
+  // CHERI TODO:
+  // I will probably want to create some sort of "cheri alu" to do all the capability checking and stuff
+  // want to reuse the alu for some stuff as well though
+
+  // CHERI ALU
+  ibex_cheri_alu cheri_alu (
+      .base_opcode_i(cheri_base_opcode_i),
+      .threeop_opcode_i(cheri_threeop_opcode_i),
+      .store_opcode_i(cheri_store_opcode_i),
+      .load_opcode_i(cheri_load_opcode_i),
+      .sad_opcode_i(cheri_sad_opcode_i),
+
+      // TODO rest of connections
+      .operand_a_i(cheri_operand_a_i),
+      .operand_b_i(cheri_operand_b_i),
+      .returnvalue_o(cheri_result),
+      .wroteCapability(cheri_wrote_cap_o),
+      .exceptions_a_o(cheri_exc_a),
+      .exceptions_b_o(cheri_exc_b)
+
   );
 
   ////////////////
@@ -164,5 +214,12 @@ module ibex_ex_block #(
 
   // ALU output valid in same cycle, multiplier/divider may require multiple cycles
   assign ex_valid_o = multdiv_en ? multdiv_valid : 1'b1;
+
+logic [`CAP_SIZE-1:0] cheri_jump_addr;
+module_wrap64_getAddr module_getAddr_a (
+    .wrap64_getAddr_cap(cheri_result),
+    .wrap64_getAddr(cheri_jump_addr));
+
+
 
 endmodule

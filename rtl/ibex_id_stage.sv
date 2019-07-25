@@ -25,6 +25,13 @@
   `define RVFI
 `endif
 
+`define CAP_SIZE 93
+`define EXCEPTION_SIZE 22
+
+
+//parameter CAP_SIZE  = 93;
+//parameter EXCEPTION_SIZE = 22;
+
 /**
  * Instruction Decode Stage
  *
@@ -83,6 +90,23 @@ module ibex_id_stage #(
     output logic [31:0]               multdiv_operand_a_ex_o,
     output logic [31:0]               multdiv_operand_b_ex_o,
 
+
+
+      // CHERI
+      output logic                     cheri_en_o,
+      output ibex_defines::cheri_base_opcode_e       cheri_base_opcode_o,
+      output ibex_defines::cheri_threeop_funct7_e    cheri_threeop_opcode_o,
+      output ibex_defines::cheri_store_funct5_e      cheri_store_opcode_o,
+      output ibex_defines::cheri_load_funct5_e       cheri_load_opcode_o,
+      output ibex_defines::cheri_s_a_d_funct5_e      cheri_sad_opcode_o,
+      output logic [`CAP_SIZE-1:0]      cheri_operand_a_o,
+      output logic [`CAP_SIZE-1:0]      cheri_operand_b_o,
+
+      input logic [`EXCEPTION_SIZE-1:0] cheri_exc_a_i,
+      input logic [`EXCEPTION_SIZE-1:0] cheri_exc_b_i,
+      input logic                  cheri_wrote_cap_i,
+
+
     // CSR
     output logic                      csr_access_o,
     output ibex_defines::csr_op_e     csr_op_o,
@@ -115,6 +139,7 @@ module ibex_id_stage #(
 
     input  logic                      lsu_load_err_i,
     input  logic                      lsu_store_err_i,
+    output logic cheri_exc_o,
 
     // Debug Signal
     output ibex_defines::dbg_cause_e  debug_cause_o,
@@ -125,7 +150,7 @@ module ibex_id_stage #(
 
     // Write back signal
     input  logic [31:0]               regfile_wdata_lsu_i,
-    input  logic [31:0]               regfile_wdata_ex_i,
+    input  logic [`CAP_SIZE-1:0]               regfile_wdata_ex_i,
     input  logic [31:0]               csr_rdata_i,
 
 `ifdef RVFI
@@ -168,6 +193,8 @@ module ibex_id_stage #(
   logic        stall_branch;
   logic        stall_jump;
 
+  logic        stall_cheri_exc;
+
   // Immediate decoding and sign extension
   logic [31:0] imm_i_type;
   logic [31:0] imm_s_type;
@@ -192,7 +219,7 @@ module ibex_id_stage #(
 
   logic [31:0] regfile_rdata_a;
   logic [31:0] regfile_rdata_b;
-  logic [31:0] regfile_wdata;
+  logic [`CAP_SIZE-1:0] regfile_wdata;
 
   rf_wd_sel_e  regfile_wdata_sel;
   logic        regfile_we;
@@ -213,6 +240,28 @@ module ibex_id_stage #(
   md_op_e      multdiv_operator;
   logic [1:0]  multdiv_signed_mode;
 
+  // CHERI
+    logic cheri_en_o;
+    cheri_base_opcode_e       cheri_base_opcode;
+    cheri_threeop_funct7_e    cheri_threeop_opcode;
+    cheri_store_funct5_e      cheri_store_opcode;
+    cheri_load_funct5_e       cheri_load_opcode;
+    cheri_s_a_d_funct5_e      cheri_sad_opcode;
+    c_op_a_sel_e    cheri_op_a_mux_sel;
+    c_op_b_sel_e    cheri_op_b_mux_sel;
+    cheri_imm_b_sel_e    cheri_imm_b_mux_sel;
+    logic cheri_a_en_dec;
+    logic cheri_b_en_dec;
+
+
+
+    logic [31:0] nullWithAddr_i;
+    logic [`CAP_SIZE-1:0] nullWithAddr_o;
+    logic [31:0] nullWithAddr2_i;
+    logic [`CAP_SIZE-1:0] nullWithAddr2_o;
+
+
+
   // Data Memory Control
   logic        data_we_id;
   logic [1:0]  data_type_id;
@@ -225,6 +274,11 @@ module ibex_id_stage #(
 
   logic [31:0] alu_operand_a;
   logic [31:0] alu_operand_b;
+
+  // We don't want to throw exceptions when we see a call trap or return trap
+  assign cheri_exc_o = (|cheri_exc_a_i[`EXCEPTION_SIZE-3:0] && cheri_a_en_dec)
+                      || (|cheri_exc_b_i[`EXCEPTION_SIZE-3:0] && cheri_b_en_dec)
+                      || ((jump_in_dec && cheri_en_o && !instr_new_i) ? cheri_exc_o : '0);
 
   /////////////
   // LSU Mux //
@@ -253,6 +307,22 @@ module ibex_id_stage #(
     endcase
   end
 
+  // CHERI ALU MUX for Operand A
+  always_comb begin
+    unique case (cheri_op_a_mux_sel)
+      CHERI_OP_A_REG_CAP: cheri_operand_a_o = regfile_rdata_a_cap;
+      CHERI_OP_A_REG_NUM: cheri_operand_a_o = regfile_rdata_a;
+      CHERI_OP_A_REG_DDC: cheri_operand_a_o = regfile_raddr_a == '0 ? 93'h100000000003FFDF690003F0 : regfile_rdata_a_cap;
+      // TODO is this needed?
+      CHERI_OP_A_FWD:   cheri_operand_a_o = lsu_addr_last_i;
+      CHERI_OP_A_PCC: begin
+        nullWithAddr2_i = pc_id_i;
+        cheri_operand_a_o = nullWithAddr2_o;
+      end
+      default:          cheri_operand_a_o = 'X;
+    endcase
+  end
+
   ///////////////////
   // Operand B MUX //
   ///////////////////
@@ -274,21 +344,54 @@ module ibex_id_stage #(
   // ALU MUX for Operand B
   assign alu_operand_b = (alu_op_b_mux_sel == OP_B_IMM) ? imm_b : regfile_rdata_b;
 
+  // CHERI ALU MUX for Operand B
+  always_comb begin
+    unique case (cheri_op_b_mux_sel)
+      CHERI_OP_B_IMM:   cheri_operand_b_o = (cheri_imm_b_mux_sel == CHERI_IMM_B_INCR_PC) ? 'h4 : imm_b;
+      CHERI_OP_B_REG_CAP:   cheri_operand_b_o = regfile_rdata_b_cap;
+      CHERI_OP_B_REG_NUM:   cheri_operand_b_o = regfile_rdata_b;
+      CHERI_OP_B_REG_DDC:   cheri_operand_b_o = regfile_raddr_b == '0 ? 93'h100000000003FFDF690003F0 : regfile_rdata_b_cap;
+      default:          cheri_operand_b_o = 'X;
+    endcase
+  end
+
   ///////////////////////
   // Register File MUX //
   ///////////////////////
 
   // Register file write enable mux - do not propagate illegal CSR ops, do not write when idle,
   // for loads/stores and multdiv operations write when the data is ready only
-  assign regfile_we = (illegal_csr_insn_i || !instr_executing || lsu_load_err_i) ? 1'b0          :
+  assign regfile_we = (illegal_csr_insn_i || !instr_executing || lsu_load_err_i || cheri_exc_o) ? 1'b0          :
                       (data_req_dec || multdiv_en_dec)         ? regfile_we_wb : regfile_we_dec;
 
   // Register file write data mux
+  logic [`CAP_SIZE-1:0] regfile_wdata_cap;
   always_comb begin : regfile_wdata_mux
     unique case (regfile_wdata_sel)
-      RF_WD_EX:  regfile_wdata = regfile_wdata_ex_i;
-      RF_WD_LSU: regfile_wdata = regfile_wdata_lsu_i;
-      RF_WD_CSR: regfile_wdata = csr_rdata_i;
+      RF_WD_EX: begin
+        nullWithAddr_i = regfile_wdata_ex_i;
+        regfile_wdata = nullWithAddr_o;
+        regfile_wdata_cap = regfile_wdata_ex_i;
+      end
+
+      RF_WD_LSU: begin
+        nullWithAddr_i  = regfile_wdata_lsu_i;
+        regfile_wdata = nullWithAddr_o;
+        regfile_wdata_cap = regfile_wdata_lsu_i;
+      end
+
+      RF_WD_CSR: begin
+        nullWithAddr_i  = csr_rdata_i;
+        regfile_wdata = nullWithAddr_o;
+        regfile_wdata_cap = csr_rdata_i;
+      end
+
+      RF_WD_CHERI: begin
+        nullWithAddr_i = regfile_wdata_ex_i;
+        regfile_wdata = cheri_wrote_cap_i ? regfile_wdata_ex_i : nullWithAddr_o;
+        regfile_wdata_cap = regfile_wdata_ex_i;
+      end
+
       default:   regfile_wdata = 'X;
     endcase;
   end
@@ -305,15 +408,22 @@ module ibex_id_stage #(
 
       // Read port a
       .raddr_a_i    ( regfile_raddr_a ),
-      .rdata_a_o    ( regfile_rdata_a ),
+      .rdata_a_o    ( regfile_rdata_a_cap ),
       // Read port b
       .raddr_b_i    ( regfile_raddr_b ),
-      .rdata_b_o    ( regfile_rdata_b ),
+      .rdata_b_o    ( regfile_rdata_b_cap ),
       // write port
       .waddr_a_i    ( regfile_waddr   ),
       .wdata_a_i    ( regfile_wdata   ),
       .we_a_i       ( regfile_we      )
   );
+
+  always_comb begin
+    a_getAddr_i = regfile_rdata_a_cap;
+    regfile_rdata_a = a_getAddr_o;
+    b_getAddr_i = regfile_rdata_b_cap;
+    regfile_rdata_b = b_getAddr_o;
+  end
 
 `ifdef RVFI
   assign rfvi_reg_raddr_ra_o = regfile_raddr_a;
@@ -321,7 +431,8 @@ module ibex_id_stage #(
   assign rfvi_reg_raddr_rb_o = regfile_raddr_b;
   assign rfvi_reg_rdata_rb_o = regfile_rdata_b;
   assign rfvi_reg_waddr_rd_o = regfile_waddr;
-  assign rfvi_reg_wdata_rd_o = regfile_wdata;
+  // TODO fix
+  assign rfvi_reg_wdata_rd_o = rd_getAddr_o;
   assign rfvi_reg_we_o       = regfile_we;
 `endif
 
@@ -376,6 +487,21 @@ module ibex_id_stage #(
       .div_en_o                        ( div_en_dec           ),
       .multdiv_operator_o              ( multdiv_operator     ),
       .multdiv_signed_mode_o           ( multdiv_signed_mode  ),
+
+        // CHERI
+        .cheri_en_o(cheri_en_o),
+        .cheri_base_opcode_o(cheri_base_opcode_o),
+        .cheri_threeop_opcode_o(cheri_threeop_opcode_o),
+        .cheri_store_opcode_o(cheri_store_opcode_o),
+        .cheri_load_opcode_o(cheri_load_opcode_o),
+        .cheri_sad_opcode_o(cheri_sad_opcode_o),
+        .cheri_op_a_mux_sel_o(cheri_op_a_mux_sel),
+        .cheri_op_b_mux_sel_o(cheri_op_b_mux_sel),
+        .cheri_imm_b_mux_sel_o(cheri_imm_b_mux_sel),
+
+        .cheri_a_en_o(cheri_a_en_dec),
+        .cheri_b_en_o(cheri_b_en_dec),
+
 
       // CSRs
       .csr_access_o                    ( csr_access_o         ),
@@ -441,6 +567,9 @@ module ibex_id_stage #(
       .load_err_i                     ( lsu_load_err_i         ),
       .store_err_i                    ( lsu_store_err_i        ),
 
+      // CHERI exception signals
+      .cheri_exc_i(cheri_exc_o),
+
       // jump/branch control
       .branch_set_i                   ( branch_set_q           ),
       .jump_set_i                     ( jump_set               ),
@@ -477,6 +606,7 @@ module ibex_id_stage #(
       .stall_multdiv_i                ( stall_multdiv          ),
       .stall_jump_i                   ( stall_jump             ),
       .stall_branch_i                 ( stall_branch           ),
+      .stall_cheri_exc_i(stall_cheri_exc),
 
       // Performance Counters
       .perf_jump_o                    ( perf_jump_o            ),
@@ -532,6 +662,9 @@ module ibex_id_stage #(
   assign alu_operand_a_ex_o          = alu_operand_a;
   assign alu_operand_b_ex_o          = alu_operand_b;
 
+  // assign cheri_alu_operand_a_ex_o   = cheri_alu_operand_a_o;
+  // assign cheri_alu_operand_b_ex_o   = cheri_alu_operand_b_o;
+
   assign mult_en_ex_o                = mult_en_id;
   assign div_en_ex_o                 = div_en_id;
 
@@ -573,6 +706,7 @@ module ibex_id_stage #(
     stall_multdiv           = 1'b0;
     stall_jump              = 1'b0;
     stall_branch            = 1'b0;
+    stall_cheri_exc = 1'b0;
     branch_set_n            = 1'b0;
     perf_branch_o           = 1'b0;
     instr_ret_o             = 1'b0;
@@ -611,6 +745,11 @@ module ibex_id_stage #(
               stall_jump              = 1'b1;
               instr_multicycle_done_n = 1'b0;
             end
+            cheri_en_o && (cheri_exc_o): begin
+              id_wb_fsm_ns = WAIT_MULTICYCLE;
+              stall_cheri_exc = 1'b1;
+              instr_multicycle_done_n = 1'b0;
+            end
             default: begin
               instr_ret_o             = 1'b1;
             end
@@ -629,6 +768,7 @@ module ibex_id_stage #(
           stall_multdiv           = multdiv_en_dec;
           stall_branch            = branch_in_dec;
           stall_jump              = jump_in_dec;
+          stall_cheri_exc = cheri_en_o && cheri_exc_o;
         end
       end
 
@@ -639,6 +779,36 @@ module ibex_id_stage #(
   end
 
   assign instr_ret_compressed_o = instr_ret_o & instr_is_compressed_i;
+
+  module_wrap64_nullWithAddr nullWithAddr (
+      .wrap64_nullWithAddr_addr(nullWithAddr_i),
+      .wrap64_nullWithAddr(nullWithAddr_o)
+  );
+
+  module_wrap64_nullWithAddr nullWithAddr2 (
+      .wrap64_nullWithAddr_addr(nullWithAddr2_i),
+      .wrap64_nullWithAddr(nullWithAddr2_o)
+  );
+
+logic [`CAP_SIZE-1:0] regfile_rdata_a_cap;
+logic [`CAP_SIZE-1:0] regfile_rdata_b_cap;
+
+logic [`CAP_SIZE-1:0] a_getAddr_i;
+logic [`CAP_SIZE-1:0] a_getAddr_o;
+module_wrap64_getAddr module_getAddr_a (
+    .wrap64_getAddr_cap(a_getAddr_i),
+    .wrap64_getAddr(a_getAddr_o));
+
+logic [`CAP_SIZE-1:0] b_getAddr_i;
+logic [`CAP_SIZE-1:0] b_getAddr_o;
+module_wrap64_getAddr module_getAddr_b (
+    .wrap64_getAddr_cap(b_getAddr_i),
+    .wrap64_getAddr(b_getAddr_o));
+
+logic [`CAP_SIZE-1:0] rd_getAddr_o;
+module_wrap64_getAddr module_getAddr_rd (
+    .wrap64_getAddr_cap(regfile_wdata),
+    .wrap64_getAddr(rd_getAddr_o));
 
   ////////////////
   // Assertions //

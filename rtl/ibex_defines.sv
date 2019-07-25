@@ -36,6 +36,7 @@ typedef enum logic [6:0] {
   OPCODE_STORE    = 7'h23,
   OPCODE_OP       = 7'h33,
   OPCODE_LUI      = 7'h37,
+  OPCODE_CHERI    = 7'h5b,
   OPCODE_BRANCH   = 7'h63,
   OPCODE_JALR     = 7'h67,
   OPCODE_JAL      = 7'h6f,
@@ -89,6 +90,121 @@ typedef enum logic [1:0] {
   MD_OP_REM
 } md_op_e;
 
+//////////////////////
+// CHERI operations //
+//////////////////////
+
+typedef enum logic [2:0] {
+  THREE_OP          = 3'h0,
+  C_INC_OFFSET_IMM  = 3'h1,
+  C_SET_BOUNDS_IMM  = 3'h2
+} cheri_base_opcode_e;
+
+// THREE_OPS
+typedef enum logic [6:0] {
+  C_SPECIAL_RW        = 7'h01,
+  C_SET_BOUNDS        = 7'h08,
+  C_SET_BOUNDS_EXACT  = 7'h09,
+  C_SEAL              = 7'h0B,
+  C_UNSEAL            = 7'h0C,
+  C_AND_PERM          = 7'h0D,
+  C_SET_FLAGS         = 7'h0E,
+  C_SET_OFFSET        = 7'h0F,
+  C_SET_ADDR          = 7'h10,
+  C_INC_OFFSET        = 7'h11,
+  C_TO_PTR            = 7'h12,
+  C_FROM_PTR          = 7'h13,
+  C_SUB               = 7'h14,
+  C_BUILD_CAP         = 7'h1D,
+  C_COPY_TYPE         = 7'h1E,
+  C_C_SEAL            = 7'h1F,
+  C_TEST_SUBSET       = 7'h20,
+  STORE               = 7'h7C,
+  LOAD                = 7'h7D,
+  CCALL               = 7'h7E,
+  SOURCE_AND_DEST     = 7'h7F
+} cheri_threeop_funct7_e;
+
+// STORES
+typedef enum logic [4:0] {
+  SB_DDC = 5'h00,
+  SH_DDC = 5'h01,
+  SW_DDC = 5'h02,
+  SD_DDC = 5'h03,
+  SQ_DDC = 5'h04,
+  SB_CAP = 5'h08,
+  SH_CAP = 5'h09,
+  SW_CAP = 5'h0A,
+  SD_CAP = 5'h0B,
+  SQ_CAP = 5'h0C
+} cheri_store_funct5_e;
+
+// LOADS
+typedef enum logic [4:0] {
+  LB_DDC  = 5'h00,
+  LH_DDC  = 5'h01,
+  LW_DDC  = 5'h02,
+  LD_DDC  = 5'h03,
+  LBU_DDC = 5'h04,
+  LHU_DDC = 5'h05,
+  LWU_DDC = 5'h06,
+  LB_CAP  = 5'h08,
+  LH_CAP  = 5'h09,
+  LW_CAP  = 5'h0A,
+  LD_CAP  = 5'h0B,
+  LBU_CAP = 5'h0C,
+  LHU_CAP = 5'h0D,
+  LWU_CAP = 5'h0E,
+  LQ_DDC  = 5'h17,
+  LQ_CAP  = 5'h1F
+} cheri_load_funct5_e;
+
+typedef enum logic [4:0] {
+  C_GET_PERM    = 5'h00,
+  C_GET_TYPE    = 5'h01,
+  C_GET_BASE    = 5'h02,
+  C_GET_LEN     = 5'h03,
+  C_GET_TAG     = 5'h04,
+  C_GET_SEALED  = 5'h05,
+  C_GET_OFFSET  = 5'h06,
+  C_GET_FLAGS   = 5'h07,
+  C_MOVE        = 5'h0A,
+  C_CLEAR_TAG   = 5'h0B,
+  C_JALR        = 5'h0C,
+  CLEAR         = 5'h0D,
+  C_GET_ADDR    = 5'h0F,
+  C_FP_CLEAR    = 5'h10,
+  ONE_OP        = 5'h1f
+} cheri_s_a_d_funct5_e;
+
+//////////////////////
+// CHERI Exceptions //
+//////////////////////
+
+typedef enum logic [4:0] {
+  ACCESS_SYSTEM_REGISTERS_VIOLATION,
+  TAG_VIOLATION,
+  SEAL_VIOLATION,
+  TYPE_VIOLATION,
+  PERMIT_SEAL_VIOLATION,
+  PERMIT_CCALL_VIOLATION,
+  ACCESS_CCALL_IDC_VIOLATION,
+  PERMIT_UNSEAL_VIOLATION,
+  PERMIT_SETSID_VIOLATION,
+  PERMIT_EXECUTE_VIOLATION,
+  PERMIT_LOAD_VIOLATION,
+  PERMIT_STORE_VIOLATION,
+  PERMIT_LOAD_CAPABILITY_VIOLATION,
+  PERMIT_STORE_CAPABILITY_VIOLATION,
+  PERMIT_STORE_LOCAL_CAPABILITY_VIOLATION,
+  GLOBAL_VIOLATION,
+  LENGTH_VIOLATION,
+  INEXACT_BOUNDS_VIOLATION,
+  SOFTWARE_DEFINED_VIOLATION,
+  MMU_PROHIBITS_STORE_VIOLATION,
+  CALL_TRAP,
+  RETURN_TRAP
+} cheri_capability_exception_e;
 
 //////////////////////////////////
 // Control and status registers //
@@ -130,6 +246,15 @@ typedef enum logic[1:0] {
   OP_A_IMM
 } op_a_sel_e;
 
+// CHERI Operand A selection
+typedef enum logic [2:0] {
+  CHERI_OP_A_REG_NUM,
+  CHERI_OP_A_REG_CAP,
+  CHERI_OP_A_REG_DDC,
+  CHERI_OP_A_PCC,
+  CHERI_OP_A_FWD
+} c_op_a_sel_e;
+
 // Immediate a selection
 typedef enum logic {
   IMM_A_Z,
@@ -142,6 +267,14 @@ typedef enum logic {
   OP_B_IMM
 } op_b_sel_e;
 
+// CHERI Operand B selection
+typedef enum logic [2:0] {
+  CHERI_OP_B_REG_NUM,
+  CHERI_OP_B_REG_CAP,
+  CHERI_OP_B_REG_DDC,
+  CHERI_OP_B_IMM
+} c_op_b_sel_e;
+
 // Immediate b selection
 typedef enum logic [2:0] {
   IMM_B_I,
@@ -153,11 +286,19 @@ typedef enum logic [2:0] {
   IMM_B_INCR_ADDR
 } imm_b_sel_e;
 
+// CHERI Immediate B selection
+typedef enum logic [2:0] {
+  CHERI_IMM_B_I,
+  CHERI_IMM_B_S,
+  CHERI_IMM_B_INCR_PC
+} cheri_imm_b_sel_e;
+
 // Regfile write data selection
 typedef enum logic [1:0] {
   RF_WD_LSU,
   RF_WD_EX,
-  RF_WD_CSR
+  RF_WD_CSR,
+  RF_WD_CHERI
 } rf_wd_sel_e;
 
 //////////////
@@ -224,6 +365,11 @@ typedef enum logic[11:0] {
   CSR_DSCRATCH0 = 12'h7b2, // optional
   CSR_DSCRATCH1 = 12'h7b3, // optional
 
+  // CHERI CSRs
+  CSR_UCCSR = 12'h8C0,
+  CSR_SCCSR = 12'h9C0,
+  CSR_MCCSR = 12'hBC0,
+
   // Machine Counter/Timers
   CSR_MCOUNTINHIBIT      = 12'h320,
   CSR_MCYCLE             = 12'hB00,
@@ -231,6 +377,17 @@ typedef enum logic[11:0] {
   CSR_MINSTRET           = 12'hB02,
   CSR_MINSTRETH          = 12'hB82
 } csr_num_e;
+
+// CHERI SCR
+typedef enum logic [4:0] {
+  SCR_PCC = 5'h00, // shouldn't necessarily be implemented same as the ones below
+  SCR_DDC = 5'h01, // shouldn't necessarily be implemented same as the ones below
+
+  SCR_MTCC = 5'h1C, // should always be accessible
+  SCR_MTDC = 5'h1D,
+  SCR_MSCRATCHC = 5'h1E,
+  SCR_MEPCC = 5'h1F // should always be accessible
+} cheri_scr_e;
 
 // CSR mhpmcounter-related offsets and mask
 parameter logic [11:0] CSR_OFF_MCOUNTER_SETUP = 12'h320; // mcounter_setup @ 12'h323 - 12'h33F

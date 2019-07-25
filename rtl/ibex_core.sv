@@ -25,6 +25,26 @@
   `define RVFI
 `endif
 
+// TODO put this in the makefile
+`define CAP_SIZE 93
+`define EXCEPTION_SIZE 22
+
+/*
+parameter CAP_SIZE  = `CAP_SIZE;
+parameter OTYPE_SIZE = 4;
+parameter REGS_PER_QUARTER = 4;
+parameter INTEGER_SIZE = 32;
+parameter FLAG_SIZE = 1;
+parameter PERMS_SIZE = 31;
+parameter LENGTH_SIZE = 33;
+parameter OFFSET_SIZE = 32;
+parameter BASE_SIZE = 32;
+parameter EXCEPTION_SIZE = 22;
+
+*/
+
+
+
 /**
  * Top level module of the ibex RISC-V core
  */
@@ -130,6 +150,7 @@ module ibex_core #(
 
   logic        lsu_load_err;
   logic        lsu_store_err;
+  logic cheri_exc;
 
   // LSU signals
   logic        lsu_addr_incr_req;
@@ -152,7 +173,23 @@ module ibex_core #(
   logic [31:0] alu_operand_b_ex;
 
   logic [31:0] alu_adder_result_ex;    // Used to forward computed address to LSU
-  logic [31:0] regfile_wdata_ex;
+  logic [`CAP_SIZE - 1:0] regfile_wdata_ex;
+
+
+    // CHERI
+    logic                     cheri_en;
+    cheri_base_opcode_e       cheri_base_opcode;
+    cheri_threeop_funct7_e    cheri_threeop_opcode;
+    cheri_store_funct5_e      cheri_store_opcode;
+    cheri_load_funct5_e       cheri_load_opcode;
+    cheri_s_a_d_funct5_e      cheri_sad_opcode;
+    logic [`CAP_SIZE -1:0]      cheri_operand_a;
+    logic [`CAP_SIZE -1:0]      cheri_operand_b;
+
+    logic [`EXCEPTION_SIZE -1:0] cheri_exc_a;
+    logic [`EXCEPTION_SIZE -1:0] cheri_exc_b;
+    logic                  cheri_wrote_cap;
+
 
   // Multiplier Control
   logic        mult_en_ex;
@@ -402,6 +439,23 @@ module ibex_core #(
       .multdiv_operand_a_ex_o       ( multdiv_operand_a_ex   ),
       .multdiv_operand_b_ex_o       ( multdiv_operand_b_ex   ),
 
+      // CHERI
+      .cheri_en_o(cheri_en),
+      .cheri_base_opcode_o(cheri_base_opcode),
+      .cheri_threeop_opcode_o(cheri_threeop_opcode),
+      .cheri_store_opcode_o(cheri_store_opcode),
+      .cheri_load_opcode_o(cheri_load_opcode),
+      .cheri_sad_opcode_o(cheri_sad_opcode),
+      .cheri_operand_a_o(cheri_operand_a),
+      .cheri_operand_b_o(cheri_operand_b),
+
+      .cheri_exc_a_i(cheri_exc_a),
+      .cheri_exc_b_i(cheri_exc_b),
+      .cheri_exc_o(cheri_exc),
+      .cheri_wrote_cap_i(cheri_wrote_cap),
+
+
+
       // CSR ID/EX
       .csr_access_o                 ( csr_access             ),
       .csr_op_o                     ( csr_op                 ),
@@ -485,6 +539,21 @@ module ibex_core #(
       .multdiv_signed_mode_i      ( multdiv_signed_mode_ex ),
       .multdiv_operand_a_i        ( multdiv_operand_a_ex   ),
       .multdiv_operand_b_i        ( multdiv_operand_b_ex   ),
+
+      // CHERI
+      .cheri_en_i(cheri_en),
+      .cheri_base_opcode_i(cheri_base_opcode),
+      .cheri_threeop_opcode_i(cheri_threeop_opcode),
+      .cheri_store_opcode_i(cheri_store_opcode),
+      .cheri_load_opcode_i(cheri_load_opcode),
+      .cheri_sad_opcode_i(cheri_sad_opcode),
+      .cheri_operand_a_i(cheri_operand_a),
+      .cheri_operand_b_i(cheri_operand_b),
+
+      .cheri_exc_a_o(cheri_exc_a),
+      .cheri_exc_b_o(cheri_exc_b),
+      .cheri_wrote_cap_o(cheri_wrote_cap),
+
 
       // Outputs
       .alu_adder_result_ex_o      ( alu_adder_result_ex    ), // to LSU
@@ -635,7 +704,7 @@ module ibex_core #(
       rvfi_mem_addr          <= '0;
     end else begin
       rvfi_halt              <= '0;
-      rvfi_trap      <= lsu_store_err || lsu_load_err;
+      rvfi_trap      <= lsu_store_err || lsu_load_err || cheri_exc;
       rvfi_intr              <= irq_ack_o;
       rvfi_order             <= rvfi_order + rvfi_valid;
       rvfi_insn              <= rvfi_insn_id;
