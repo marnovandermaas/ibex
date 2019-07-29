@@ -84,7 +84,13 @@ module ibex_ex_block #(
   logic        multdiv_valid, multdiv_en_sel;
   logic        multdiv_en;
 
+  logic [31:0] alu_operand_a;
+  logic [31:0] alu_operand_b;
+
   logic [`CAP_SIZE-1:0] cheri_result;
+  // TODO change size?
+  logic [31:0] cheri_alu_operand_a;
+  logic [31:0] cheri_alu_operand_b;
 
   logic [`EXCEPTION_SIZE-1:0] cheri_exc_a;
   logic [`EXCEPTION_SIZE-1:0] cheri_exc_b;
@@ -109,6 +115,9 @@ module ibex_ex_block #(
     assign multdiv_en         = 1'b0;
   end
 
+  assign alu_operand_a = cheri_en_i ? cheri_alu_operand_a : alu_operand_a_i;
+  assign alu_operand_b = cheri_en_i ? cheri_alu_operand_b : alu_operand_b_i;
+
   `ifdef QUARTUS
     endgenerate
   `endif
@@ -128,8 +137,8 @@ module ibex_ex_block #(
 
   ibex_alu alu_i (
       .operator_i          ( alu_operator_i            ),
-      .operand_a_i         ( alu_operand_a_i           ),
-      .operand_b_i         ( alu_operand_b_i           ),
+      .operand_a_i         ( alu_operand_a             ),
+      .operand_b_i         ( alu_operand_b             ),
       .multdiv_operand_a_i ( multdiv_alu_operand_a     ),
       .multdiv_operand_b_i ( multdiv_alu_operand_b     ),
       .multdiv_en_i        ( multdiv_en_sel            ),
@@ -140,9 +149,6 @@ module ibex_ex_block #(
       .is_equal_result_o   ( alu_is_equal_result       )
   );
 
-  // CHERI TODO:
-  // I will probably want to create some sort of "cheri alu" to do all the capability checking and stuff
-  // want to reuse the alu for some stuff as well though
 
   // CHERI ALU
   ibex_cheri_alu cheri_alu (
@@ -157,6 +163,9 @@ module ibex_ex_block #(
       .operand_b_i(cheri_operand_b_i),
       .returnvalue_o(cheri_result),
       .wroteCapability(cheri_wrote_cap_o),
+      .alu_operand_a_o(cheri_alu_operand_a),
+      .alu_operand_b_o(cheri_alu_operand_b),
+      .alu_result_i(alu_adder_result_ex_o),
       .exceptions_a_o(cheri_exc_a),
       .exceptions_b_o(cheri_exc_b)
 

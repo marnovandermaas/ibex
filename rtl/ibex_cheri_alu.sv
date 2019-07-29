@@ -55,6 +55,8 @@ parameter EXCEPTION_SIZE = 22;
 *///
 
 
+// TODO: remove all adds in this file and use connections to the ALU instead.
+//       may improve area required for the design
 
 // ask:
 // what do i do if i try to do a capability instruction on a non-capability operand?
@@ -105,15 +107,16 @@ module ibex_cheri_alu (
   input logic [`CAP_SIZE-1:0] operand_a_i,
   input logic [`CAP_SIZE-1:0] operand_b_i,
 
+  output logic [`INTEGER_SIZE-1:0] alu_operand_a_o,
+  output logic [`INTEGER_SIZE-1:0] alu_operand_b_o,
+  input logic [31:0] alu_result_i,
+
   output logic [`CAP_SIZE-1:0] returnvalue_o,
   output logic wroteCapability,
 
   output logic [`EXCEPTION_SIZE-1:0] exceptions_a_o,
   output logic [`EXCEPTION_SIZE-1:0] exceptions_b_o
 
-
-  // need a whole load of signals for the different exceptions that could be thrown
-  
 );
   import ibex_defines::*;
 
@@ -138,10 +141,13 @@ module ibex_cheri_alu (
             returnvalue_o = a_setBounds_o[`CAP_SIZE-1:0];
             wroteCapability = 1'b1;
 
+            alu_operand_a_o = a_getAddr_o;
+            alu_operand_b_o = operand_b_i;
+
             exceptions_a_o =   exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
                             |  exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
                             |  exceptions_a[LENGTH_VIOLATION] << LENGTH_VIOLATION
-                            |  ((a_getAddr_o+operand_b_i > a_getTop_o) << LENGTH_VIOLATION);
+                            |  ((alu_result_i > a_getTop_o) << LENGTH_VIOLATION);
           end
 
           C_SET_BOUNDS_EXACT: begin
@@ -325,10 +331,6 @@ module ibex_cheri_alu (
 
           // TODO implement later
           C_C_SEAL: begin
-            // NOTE THIS INSTRUCTION DOESNT QUITE WORK WITH THE CURRENT EXCEPTION STUFF AT THE BOTTOM OF THE FILE
-            // 
-
-
             a_setType_i = b_getAddr_o;
             returnvalue_o = (!b_isValidCap_o || b_getAddr_o == {`INTEGER_SIZE{1'b1}}) ? operand_a_i : a_setType_o;
             wroteCapability = 1'b1;
