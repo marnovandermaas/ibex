@@ -23,6 +23,7 @@ FILELIST=../rtl/avalon/ibex_core_avalon.sv \
 			../rtl/ibex_tracer_defines.sv \
 			../rtl/ibex_tracer.sv \
 			../rtl/ibex_cheri_alu.sv \
+			../rtl/ibex_cheri_memchecker.sv \
 			../rtl/cheri/*
 
 TARGET=ibex_core_avalon
@@ -35,6 +36,7 @@ default: all
 all: verilator compile
 trace: verilator-trace compile
 
+# TODO remove NOWIDTH
 verilator:
 	verilator +define+RVFI +define+DII -Wno-WIDTH -Wno-UNOPTFLAT --cc $(FILELIST) --exe $(SIMFILE) $(LIBS) --top-module ibex_core_avalon
 

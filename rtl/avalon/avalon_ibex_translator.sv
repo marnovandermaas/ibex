@@ -11,29 +11,29 @@ module avalon_ibex_translator_main (
     // inputs from ibex:
     input logic        data_req_i,
     input logic        data_we_i,
-    input logic [3:0]  data_be_i,
+    input logic [7:0]  data_be_i,
     input logic [31:0] data_addr_i,
-    input logic [31:0] data_wdata_i,
+    input logic [64:0] data_wdata_i,
 
     // inputs from avalon slave:
     input logic        avm_main_waitrequest,
     input logic        avm_main_readdatavalid,
-    input logic [31:0] avm_main_readdata,
+    input logic [64:0] avm_main_readdata,
     input logic [1:0]  avm_main_response,
 
 
     // outputs for ibex
     output  logic        data_gnt_o,
     output  logic        data_rvalid_o,
-    output  logic [31:0] data_rdata_o,
+    output  logic [64:0] data_rdata_o,
     output  logic        data_err_o, 
 
     // outputs for avalon slave
     output logic [31:0] avm_main_address,
-    output logic [3:0]  avm_main_byteenable,
+    output logic [7:0]  avm_main_byteenable,
     output logic        avm_main_read,
     output logic        avm_main_write,
-    output logic [31:0] avm_main_writedata
+    output logic [64:0] avm_main_writedata
 );
 
     logic write_good;

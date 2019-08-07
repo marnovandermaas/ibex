@@ -19,6 +19,10 @@
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
 
+`define CAP_SIZE 93
+`define ALMIGHTY_CAP 93'h100000000003FFDF690003F0
+`define NULL_CAP 93'h000000000000001f690003f0
+
 /**
  * Control and Status Registers
  *
@@ -46,9 +50,24 @@ module ibex_cs_registers #(
     input  ibex_defines::csr_op_e    csr_op_i,
     output logic [31:0]              csr_rdata_o,
 
+    // Interface to special capability registers
+    input  logic                     scr_access_i,
+    input  ibex_defines::scr_num_e   scr_addr_i,
+    input  logic [`CAP_SIZE-1:0]              scr_wdata_i,
+    input  ibex_defines::scr_op_e    scr_op_i,
+    output logic [`CAP_SIZE-1:0]              scr_rdata_o,
+
+    output logic [`CAP_SIZE-1:0] scr_mtcc_o,
+
+    // DDC always needs to be accessible
+    output logic [`CAP_SIZE-1:0] scr_ddc_o,
+
     // Interrupts
     output logic                     m_irq_enable_o,
     output logic [31:0]              csr_mepc_o,
+
+    // exception signal
+    output logic exc_o,
 
     // debug
     input  ibex_defines::dbg_cause_e debug_cause_i,
@@ -57,8 +76,8 @@ module ibex_cs_registers #(
     output logic                     debug_single_step_o,
     output logic                     debug_ebreakm_o,
 
-    input  logic [31:0]              pc_if_i,
-    input  logic [31:0]              pc_id_i,
+    input  logic [`CAP_SIZE-1:0]              pc_if_i,
+    input  logic [`CAP_SIZE-1:0]              pc_id_i,
 
     input  logic                     csr_save_if_i,
     input  logic                     csr_save_id_i,
@@ -148,6 +167,9 @@ module ibex_cs_registers #(
   // Interrupt and exception control signals
   logic [31:0] exception_pc;
 
+  // DDC
+  logic [`CAP_SIZE-1:0] ddc_q, ddc_d;
+
   // CSRs
   Status_t     mstatus_q, mstatus_d;
   logic [31:0] mscratch_q, mscratch_d;
@@ -158,6 +180,29 @@ module ibex_cs_registers #(
   logic [31:0] depc_q, depc_d;
   logic [31:0] dscratch0_q, dscratch0_d;
   logic [31:0] dscratch1_q, dscratch1_d;
+
+  //SCRs
+  logic [`CAP_SIZE-1:0] mepcc_q, mepcc_d;
+  logic [`CAP_SIZE-1:0] mtcc_q, mtcc_d;
+  logic [`CAP_SIZE-1:0] mtdc_q, mtdc_d;
+  logic [`CAP_SIZE-1:0] mscratchc_q, mscratchc_d;
+  assign scr_mtcc_o = mtcc_q;
+
+
+  // TODO THESE ARE THE SCRS FOR USER AND SUPERVISOR MODE
+  // THESE SHOULDN'T REALLY BE HERE BUT APPARENTLY SAIL NEEDS THEM
+  // AND THE SPEC DOESN'T SPECIFY THAT IMPLEMENTATIONS NOT SUPPORTING USER AND SUPERVISOR MODE
+  // DON'T NEED THESE
+  logic [`CAP_SIZE-1:0] sepcc_q, sepcc_d;
+  logic [`CAP_SIZE-1:0] stcc_q, stcc_d;
+  logic [`CAP_SIZE-1:0] stdc_q, stdc_d;
+  logic [`CAP_SIZE-1:0] sscratchc_q, sscratchc_d;
+  logic [`CAP_SIZE-1:0] uepcc_q, uepcc_d;
+  logic [`CAP_SIZE-1:0] utcc_q, utcc_d;
+  logic [`CAP_SIZE-1:0] utdc_q, utdc_d;
+  logic [`CAP_SIZE-1:0] uscratchc_q, uscratchc_d;
+
+
 
   // Hardware performance monitor signals
   logic [31:0] mcountinhibit_d, mcountinhibit_q, mcountinhibit;
@@ -198,7 +243,11 @@ module ibex_cs_registers #(
   // read logic
   always_comb begin
     csr_rdata_int = '0;
+    scr_rdata_o = '0;
     illegal_csr   = 1'b0;
+
+    // we always want ddc to be accessible
+    scr_ddc_o = ddc_q;
 
     unique case (csr_addr_i)
       // mhartid: unique hardware thread id
@@ -223,10 +272,10 @@ module ibex_cs_registers #(
       CSR_MSCRATCH: csr_rdata_int = mscratch_q;
 
       // mtvec: trap-vector base address
-      CSR_MTVEC: csr_rdata_int = csr_mtvec_i;
+      CSR_MTVEC: csr_rdata_int = mtcc_offset;
 
       // mepc: exception program counter
-      CSR_MEPC: csr_rdata_int = mepc_q;
+      CSR_MEPC: csr_rdata_int = mepcc_offset;
 
       // mcause: exception cause
       CSR_MCAUSE: csr_rdata_int = {mcause_q[5], 26'b0, mcause_q[4:0]};
@@ -245,6 +294,7 @@ module ibex_cs_registers #(
       CSR_MCYCLEH:       csr_rdata_int = mhpmcounter_q[0][63:32];
       CSR_MINSTRET:      csr_rdata_int = mhpmcounter_q[2][31: 0];
       CSR_MINSTRETH:     csr_rdata_int = mhpmcounter_q[2][63:32];
+
 
       default: begin
         if ((csr_addr & CSR_MASK_MCOUNTER) == CSR_OFF_MCOUNTER_SETUP) begin
@@ -278,6 +328,31 @@ module ibex_cs_registers #(
         end
       end
     endcase
+
+    unique case (scr_addr_i)
+
+      SCR_DDC: scr_rdata_o = ddc_q;
+      SCR_PCC: scr_rdata_o = pc_id_i;
+      // TODO what if we want to set it using mtvec?
+      SCR_MTCC: scr_rdata_o = mtcc_q;
+      SCR_MTDC: scr_rdata_o = mtdc_q;
+      SCR_MSCRATCHC: scr_rdata_o = mscratchc_q;
+      SCR_MEPCC: scr_rdata_o = mepcc_q;
+
+      // TODO REMOVE THESE CASES EVENTUALLY
+      SCR_UTCC: scr_rdata_o = utcc_q;
+      SCR_UTDC: scr_rdata_o = utdc_q;
+      SCR_USCRATCHC: scr_rdata_o = uscratchc_q;
+      SCR_UEPCC: scr_rdata_o = uepcc_q;
+      SCR_STCC: scr_rdata_o = stcc_q;
+      SCR_STDC: scr_rdata_o = stdc_q;
+      SCR_SSCRATCHC: scr_rdata_o = sscratchc_q;
+      SCR_SEPCC: scr_rdata_o = sepcc_q;
+
+
+
+      default: scr_rdata_o = 'X;
+    endcase
   end
 
   // write logic
@@ -296,6 +371,13 @@ module ibex_cs_registers #(
     mcountinhibit_we = 1'b0;
     mhpmcounter_we   = '0;
     mhpmcounterh_we  = '0;
+    mtcc_setOffset_cap = mtcc_q;
+    mtcc_setOffset_i = '0;
+    mtcc_d = mtcc_q;
+
+    mepcc_setOffset_i = mepcc_offset;
+
+    ddc_d = ddc_q;
 
     unique case (csr_addr_i)
       // mstatus: IE bit
@@ -400,6 +482,102 @@ module ibex_cs_registers #(
       end
     endcase
 
+    unique case (scr_addr_i)
+      SCR_DDC: begin
+        if (scr_we_int) begin
+          ddc_d = scr_wdata_i;
+        end
+      end
+
+      // TODO look at these again
+      SCR_MEPCC: begin
+        if (scr_we_int) begin
+          mepcc_d = scr_wdata_i;
+        end
+      end
+
+      SCR_MTCC: begin
+        if (scr_we_int) begin
+          // TODO this will need changed once the spec is updated
+          // at the moment the cspecialrw instruction swaps the values blindly, but it needs to
+          // make sure that the bottom two bits of the mtvec that is read are valid and not reserved
+          mtcc_setOffset_cap = scr_wdata_i;
+          mtcc_setOffset_i = {scr_wdata_getOffset_o[31:2], 2'b0};
+          mtcc_d = mtcc_setOffset_o;
+        end
+      end
+
+      SCR_MTDC: begin
+        if (scr_we_int && !exc_o) begin
+          mtdc_d = scr_wdata_i;
+        end
+      end
+
+      SCR_MSCRATCHC: begin
+        if (scr_we_int && !exc_o) begin
+          mscratchc_d = scr_wdata_i;
+        end
+      end
+
+      // TODO REMOVE THESE EVENTUALLY
+      SCR_UEPCC: begin
+        if (scr_we_int) begin
+          uepcc_d = scr_wdata_i;
+        end
+      end
+
+      SCR_UTCC: begin
+        if (scr_we_int) begin
+          utcc_d = scr_wdata_i;
+        end
+      end
+
+      SCR_UTDC: begin
+        if (scr_we_int && !exc_o) begin
+          utdc_d = scr_wdata_i;
+        end
+      end
+
+      SCR_USCRATCHC: begin
+        if (scr_we_int && !exc_o) begin
+          uscratchc_d = scr_wdata_i;
+        end
+      end
+
+
+
+      SCR_SEPCC: begin
+        if (scr_we_int) begin
+          sepcc_d = scr_wdata_i;
+        end
+      end
+
+      SCR_STCC: begin
+        if (scr_we_int) begin
+          stcc_d = scr_wdata_i;
+        end
+      end
+
+      SCR_STDC: begin
+        if (scr_we_int && !exc_o) begin
+          stdc_d = scr_wdata_i;
+        end
+      end
+
+      SCR_SSCRATCHC: begin
+        if (scr_we_int && !exc_o) begin
+          sscratchc_d = scr_wdata_i;
+        end
+      end
+
+
+
+
+      default: begin end
+    endcase
+
+
+
     // exception controller gets priority over other writes
     unique case (1'b1)
 
@@ -425,6 +603,7 @@ module ibex_cs_registers #(
           mstatus_d.mie  = 1'b0;
           mstatus_d.mpp  = PRIV_LVL_M;
           mepc_d         = exception_pc;
+          mepcc_d = pc_id_i;
           mcause_d       = {csr_mcause_i};
           mtval_d        = csr_mtval_i;
         end
@@ -465,6 +644,8 @@ module ibex_cs_registers #(
 
   // only write CSRs during one clock cycle
   assign csr_we_int  = csr_wreq & instr_new_id_i;
+  logic scr_we_int;
+  assign scr_we_int = instr_new_id_i && (scr_op_i == SCR_WRITE || scr_op_i == SCR_READWRITE);
 
   assign csr_rdata_o = csr_rdata_int;
 
@@ -497,6 +678,20 @@ module ibex_cs_registers #(
       depc_q     <= '0;
       dscratch0_q <= '0;
       dscratch1_q <= '0;
+      // TODO capability reset
+      ddc_q <= `ALMIGHTY_CAP;
+      mepcc_q <= `ALMIGHTY_CAP;
+      mtcc_q <= `ALMIGHTY_CAP;
+      mscratchc_q <= `NULL_CAP;
+      mtdc_q <= `NULL_CAP;
+      uepcc_q <= `ALMIGHTY_CAP;
+      utcc_q <= `ALMIGHTY_CAP;
+      uscratchc_q <= `NULL_CAP;
+      utdc_q <= `NULL_CAP;
+      sepcc_q <= `ALMIGHTY_CAP;
+      stcc_q <= `ALMIGHTY_CAP;
+      sscratchc_q <= `NULL_CAP;
+      stdc_q <= `NULL_CAP;
     end else begin
       // update CSRs
       mstatus_q  <= '{
@@ -512,7 +707,32 @@ module ibex_cs_registers #(
       depc_q      <= depc_d;
       dscratch0_q <= dscratch0_d;
       dscratch1_q <= dscratch1_d;
+
+      ddc_q <= ddc_d;
+      // TODO what if there's an exception while trying to set mepcc?
+      mepcc_q <= mepcc_d;
+      mtcc_q <= mtcc_d;
+      mscratchc_q <= mscratchc_d;
+      mtdc_q <= mtdc_d;
+
+      // TODO REMOVE THESE EVENTUALLY
+      uepcc_q <= uepcc_d;
+      utcc_q <= utcc_d;
+      uscratchc_q <= uscratchc_d;
+      utdc_q <= utdc_d;
+      sepcc_q <= sepcc_d;
+      stcc_q <= stcc_d;
+      sscratchc_q <= sscratchc_d;
+      stdc_q <= stdc_d;
     end
+  end
+
+
+  // Deal with exceptions when trying to access SCRs
+  always_comb begin
+    exc_o = scr_addr_i == '0 && (scr_op_i == SCR_WRITE || scr_op_i == SCR_READWRITE)
+          // TODO change this 10 to something else
+          ||scr_addr_i > 1'b1 && !pc_id_i_getPerms_o[10];
   end
 
   //////////////////////////
@@ -623,5 +843,44 @@ module ibex_cs_registers #(
       mcountinhibit_q    <= mcountinhibit_d;
     end
   end
+
+logic [`CAP_SIZE-1:0] mepcc_offset;
+module_wrap64_getOffset mepcc_getOffset (
+  .wrap64_getOffset_cap(mepcc_q),
+    .wrap64_getOffset(mepcc_offset));
+
+logic [`CAP_SIZE-1:0] mepcc_setOffset_i;
+logic [`CAP_SIZE:0] mepcc_setOffset_o;
+module_wrap64_setOffset mepcc_setOffset (
+  .wrap64_setOffset_cap(mepcc_q),
+    .wrap64_setOffset_offset(mepcc_setOffset_i),
+    .wrap64_setOffset(mepcc_setOffset_o));
+
+logic [`CAP_SIZE-1:0] mtcc_offset;
+module_wrap64_getOffset module_getOffset_a (
+  .wrap64_getOffset_cap(mtcc_q),
+    .wrap64_getOffset(mtcc_offset));
+
+logic [`CAP_SIZE-1:0] mtcc_setOffset_cap;
+logic [`CAP_SIZE-1:0] mtcc_setOffset_i;
+logic [`CAP_SIZE:0] mtcc_setOffset_o;
+module_wrap64_setOffset module_wrap64_setOffset_a (
+  .wrap64_setOffset_cap(mtcc_setOffset_cap),
+    .wrap64_setOffset_offset(mtcc_setOffset_i),
+    .wrap64_setOffset(mtcc_setOffset_o));
+
+logic [`CAP_SIZE-1:0] pc_id_i_getPerms_o;
+module_wrap64_getPerms module_wrap64_getPerms_pc_id_i (
+  .wrap64_getPerms_cap(pc_id_i),
+    .wrap64_getPerms(pc_id_i_getPerms_o));
+
+logic [`CAP_SIZE-1:0] scr_wdata_getOffset_o;
+module_wrap64_getOffset module_getOffset_scr (
+  .wrap64_getOffset_cap(scr_wdata_i),
+    .wrap64_getOffset(scr_wdata_getOffset_o));
+
+
+
+
 
 endmodule

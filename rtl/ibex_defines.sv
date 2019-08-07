@@ -272,6 +272,7 @@ typedef enum logic [2:0] {
   CHERI_OP_B_REG_NUM,
   CHERI_OP_B_REG_CAP,
   CHERI_OP_B_REG_DDC,
+  CHERI_OP_B_PCC,
   CHERI_OP_B_IMM
 } c_op_b_sel_e;
 
@@ -290,7 +291,9 @@ typedef enum logic [2:0] {
 typedef enum logic [2:0] {
   CHERI_IMM_B_I,
   CHERI_IMM_B_S,
-  CHERI_IMM_B_INCR_PC
+  CHERI_IMM_B_U,
+  CHERI_IMM_B_INCR_PC,
+  CHERI_IMM_B_RS2
 } cheri_imm_b_sel_e;
 
 // Regfile write data selection
@@ -381,13 +384,31 @@ typedef enum logic[11:0] {
 // CHERI SCR
 typedef enum logic [4:0] {
   SCR_PCC = 5'h00, // shouldn't necessarily be implemented same as the ones below
-  SCR_DDC = 5'h01, // shouldn't necessarily be implemented same as the ones below
+  SCR_DDC = 5'h01, // should always be accessible
+
+  SCR_UTCC = 5'h04,
+  SCR_UTDC = 5'h05,
+  SCR_USCRATCHC = 5'h06,
+  SCR_UEPCC = 5'h07,
+
+  SCR_STCC = 5'h0C,
+  SCR_STDC = 5'h0D,
+  SCR_SSCRATCHC = 5'h0E,
+  SCR_SEPCC = 5'h0F,
 
   SCR_MTCC = 5'h1C, // should always be accessible
   SCR_MTDC = 5'h1D,
   SCR_MSCRATCHC = 5'h1E,
   SCR_MEPCC = 5'h1F // should always be accessible
-} cheri_scr_e;
+} scr_num_e;
+
+// CHERI SCR operations
+typedef enum logic [1:0] {
+  SCR_NONE,
+  SCR_WRITE,
+  SCR_READ,
+  SCR_READWRITE
+} scr_op_e;
 
 // CSR mhpmcounter-related offsets and mask
 parameter logic [11:0] CSR_OFF_MCOUNTER_SETUP = 12'h320; // mcounter_setup @ 12'h323 - 12'h33F

@@ -21,6 +21,9 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 `define CAP_SIZE 93
+`define ALMIGHTY_OFFSET 93'h100000020003FFDF690003F0
+`define ALMIGHTY_OFFSET_TESTRIG 93'h120000000083FFDF690003F0
+`define ALMIGHTY_CAP 93'h100000000003FFDF690003F0
 
 /**
  * Instruction Fetch Stage
@@ -40,6 +43,10 @@ module ibex_if_stage #(
 
     // instruction cache interface
     output logic                      instr_req_o,
+    // this is the pcc
+    output logic [`CAP_SIZE-1:0]               instr_cap_o,
+    // TODO look at this again
+    // this becomes meaningless if we have a PCC
     output logic [31:0]               instr_addr_o,
     input  logic                      instr_gnt_i,
     input  logic                      instr_rvalid_i,
@@ -56,6 +63,8 @@ module ibex_if_stage #(
                                                                 // is a compressed instr
     output logic                      illegal_c_insn_id_o,      // compressed decoder thinks this
                                                                 // is an invalid instr
+
+    // TODO these have both become PCCs. should there also be a PC for RVFI purposes?
     output logic [`CAP_SIZE-1:0]               pc_if_o,
     output logic [`CAP_SIZE-1:0]               pc_id_o,
 
@@ -72,16 +81,18 @@ module ibex_if_stage #(
                                                                 // vectorized interrupt lines
 
     // jump and branch target and decision
-    input  logic [31:0]               jump_target_ex_i,         // jump target address
+    input  logic [`CAP_SIZE-1:0]               jump_target_ex_i,         // jump target address
+    input logic cap_jump_i,
 
     // CSRs
     output logic [31:0]               csr_mtvec_o,
+    input logic [`CAP_SIZE-1:0] scr_mtcc_i,
 
     // pipeline stall
     input  logic                      id_in_ready_i,            // ID stage is ready for new instr
 
     // misc signals
-    output logic [`CAP_SIZE-1:0]               pc_next,
+    output logic [31:0]               pc_next,
     output logic                      if_busy_o,                // IF stage is busy fetching instr
     output logic                      perf_imiss_o              // instr fetch miss
 );
@@ -110,6 +121,15 @@ module ibex_if_stage #(
 
   logic        [7:0] unused_boot_addr;
 
+  logic [`CAP_SIZE-1:0] curr_pc_cap_d;
+  logic [`CAP_SIZE-1:0] curr_pc_cap_q;
+
+  logic [`CAP_SIZE-1:0] jump_target;
+  // TODO THIS USES THE PC IN THE ID STAGE, MIGHT NEED TO BE CHANGED
+  assign jump_target = cap_jump_i ? jump_target_ex_i : pc_id_o_setOffset_o;
+
+  assign curr_pc_cap_d = branch_req ? fetch_addr_n : curr_pc_cap_q;
+
   assign unused_boot_addr = boot_addr_i[7:0];
 
   // extract interrupt ID from exception cause
@@ -117,32 +137,40 @@ module ibex_if_stage #(
   assign unused_irq_bit = irq_id[5];   // MSB distinguishes interrupts from exceptions
 
   // trap-vector base address, mtvec.MODE set to vectored
-  assign csr_mtvec_o = {boot_addr_i[31:8], 6'b0, 2'b01};
+  assign csr_mtvec_o = {boot_addr_i[31:8], 6'b0, 2'b00};
 
   // exception PC selection mux
   always_comb begin : exc_pc_mux
     unique case (exc_pc_mux_i)
-      EXC_PC_EXC:     exc_pc = { boot_addr_i[31:8], 8'h00                    };
-      EXC_PC_IRQ:     exc_pc = { boot_addr_i[31:8], 1'b0, irq_id[4:0], 2'b00 };
-      EXC_PC_DBD:     exc_pc = DmHaltAddr;
-      EXC_PC_DBG_EXC: exc_pc = DmExceptionAddr;
+      //EXC_PC_EXC:     exc_pc = { boot_addr_i[31:8], 8'h00                    };
+      // TODO change to MEPCC
+      //EXC_PC_EXC:     exc_pc = { boot_addr_i[31:8], 8'h00                    };
+      EXC_PC_EXC:     exc_pc = scr_mtcc_i;
+      //EXC_PC_IRQ:     exc_pc = { boot_addr_i[31:8], 1'b0, irq_id[4:0], 2'b00 };
+      EXC_PC_IRQ:     exc_pc = `ALMIGHTY_CAP;
+      //EXC_PC_DBD:     exc_pc = DmHaltAddr;
+      //EXC_PC_DBG_EXC: exc_pc = DmExceptionAddr;
+      EXC_PC_DBD:     exc_pc = `ALMIGHTY_CAP;
+      EXC_PC_DBG_EXC: exc_pc = `ALMIGHTY_CAP;
       default:        exc_pc = 'X;
     endcase
   end
 
   // fetch address selection mux
-  // TODO change to capability stuff
   always_comb begin : fetch_addr_mux
     unique case (pc_mux_i)
-      PC_BOOT: fetch_addr_n = { boot_addr_i[31:8], 8'h00 };
-      PC_JUMP: fetch_addr_n = jump_target_ex_i;
+      //PC_BOOT: fetch_addr_n = { boot_addr_i[31:8], 8'h00 };
+      PC_BOOT: fetch_addr_n = `ALMIGHTY_OFFSET_TESTRIG;
+      PC_JUMP: fetch_addr_n = jump_target;
       PC_EXC:  fetch_addr_n = exc_pc;                       // set PC to exception handler
+      // TODO need to change this back to capability stuff
       PC_ERET: fetch_addr_n = csr_mepc_i;                   // restore PC when returning from EXC
       PC_DRET: fetch_addr_n = csr_depc_i;
       default: fetch_addr_n = 'X;
     endcase
 
-    pc_next = fetch_addr_n;
+    // TODO this will need changed
+    pc_next = pc_mux_i == PC_BOOT ? mtcc_getAddr_o : fetch_addr_n_getAddr_o;
   end
 
   // prefetch buffer, caches a fixed number of instructions
@@ -153,7 +181,8 @@ module ibex_if_stage #(
       .req_i             ( req_i                       ),
 
       .branch_i          ( branch_req                  ),
-      .addr_i            ( {fetch_addr_n[31:1], 1'b0}  ),
+      //.addr_i            ( {fetch_addr_n[31:1], 1'b0}  ),
+      .addr_i            ( curr_pc_cap_d ),
 
       .ready_i           ( fetch_ready                 ),
       .valid_o           ( fetch_valid                 ),
@@ -162,6 +191,7 @@ module ibex_if_stage #(
 
       // goes to instruction memory / instruction cache
       .instr_req_o       ( instr_req_o                 ),
+      .instr_cap_o      ( instr_cap_o                ),
       .instr_addr_o      ( instr_addr_o                ),
       .instr_gnt_i       ( instr_gnt_i                 ),
       .instr_rvalid_i    ( instr_rvalid_i              ),
@@ -249,7 +279,9 @@ module ibex_if_stage #(
       instr_is_compressed_id_o   <= 1'b0;
       illegal_c_insn_id_o        <= 1'b0;
       pc_id_o                    <= '0;
+      curr_pc_cap_q <= `ALMIGHTY_OFFSET_TESTRIG;
     end else begin
+      curr_pc_cap_q <= curr_pc_cap_d;
       instr_new_id_o             <= if_id_pipe_reg_we;
       if (if_id_pipe_reg_we) begin
         instr_valid_id_o         <= 1'b1;
@@ -263,6 +295,27 @@ module ibex_if_stage #(
       end
     end
   end
+
+
+// TODO remove
+logic [`CAP_SIZE-1:0] mtcc_getAddr_o;
+module_wrap64_getAddr module_getAddr_mtcc (
+    .wrap64_getAddr_cap(scr_mtcc_i),
+    .wrap64_getAddr(mtcc_getAddr_o));
+
+logic [`CAP_SIZE-1:0] fetch_addr_n_getAddr_o;
+module_wrap64_getAddr module_getAddr_fetch_addr_n (
+    .wrap64_getAddr_cap(fetch_addr_n),
+    .wrap64_getAddr(fetch_addr_n_getAddr_o));
+
+logic [`CAP_SIZE:0] pc_id_o_setOffset_o;
+module_wrap64_setOffset module_wrap64_setOffset_pc_id_o (
+  .wrap64_setOffset_cap(pc_id_o),
+    .wrap64_setOffset_offset({jump_target_ex_i[31:1], 1'b0}),
+    .wrap64_setOffset(pc_id_o_setOffset_o));
+
+
+
 
   ////////////////
   // Assertions //

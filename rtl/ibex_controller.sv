@@ -296,7 +296,7 @@ module ibex_controller (
         if (instr_valid_i) begin
 
           // set PC in IF stage to branch or jump target
-          if (branch_set_i || jump_set_i) begin
+          if ((branch_set_i || jump_set_i) && !cheri_exc_i) begin
             pc_mux_o       = PC_JUMP;
             pc_set_o       = 1'b1;
 

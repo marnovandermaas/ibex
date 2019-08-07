@@ -66,7 +66,8 @@ module ibex_ex_block #(
     output logic [31:0]           alu_adder_result_ex_o, // to LSU
     // TODO should this be CAP_SIZE or should i have a separate signal?
     output logic [`CAP_SIZE-1:0]           regfile_wdata_ex_o,
-    output logic [31:0]           jump_target_o,         // to IF
+    output logic [`CAP_SIZE-1:0]           jump_target_o,         // to IF
+    output logic cap_jump_o,
     output logic                  branch_decision_o,     // to ID
 
     output logic                  ex_valid_o             // EX has valid output
@@ -86,11 +87,13 @@ module ibex_ex_block #(
 
   logic [31:0] alu_operand_a;
   logic [31:0] alu_operand_b;
+  alu_op_e alu_operator;
 
   logic [`CAP_SIZE-1:0] cheri_result;
   // TODO change size?
   logic [31:0] cheri_alu_operand_a;
   logic [31:0] cheri_alu_operand_b;
+  alu_op_e cheri_alu_operator;
 
   logic [`EXCEPTION_SIZE-1:0] cheri_exc_a;
   logic [`EXCEPTION_SIZE-1:0] cheri_exc_b;
@@ -117,6 +120,7 @@ module ibex_ex_block #(
 
   assign alu_operand_a = cheri_en_i ? cheri_alu_operand_a : alu_operand_a_i;
   assign alu_operand_b = cheri_en_i ? cheri_alu_operand_b : alu_operand_b_i;
+  assign alu_operator = cheri_en_i ? cheri_alu_operator : alu_operator_i;
 
   `ifdef QUARTUS
     endgenerate
@@ -129,14 +133,15 @@ module ibex_ex_block #(
 
   // branch handling
   assign branch_decision_o  = alu_cmp_result;
-  assign jump_target_o      = cheri_en_i ? cheri_jump_addr : alu_adder_result_ex_o;
+  assign jump_target_o      = cheri_en_i ? cheri_result : alu_adder_result_ex_o;
+  assign cap_jump_o = cheri_en_i;
 
   /////////
   // ALU //
   /////////
 
   ibex_alu alu_i (
-      .operator_i          ( alu_operator_i            ),
+      .operator_i          ( alu_operator            ),
       .operand_a_i         ( alu_operand_a             ),
       .operand_b_i         ( alu_operand_b             ),
       .multdiv_operand_a_i ( multdiv_alu_operand_a     ),
@@ -165,6 +170,7 @@ module ibex_ex_block #(
       .wroteCapability(cheri_wrote_cap_o),
       .alu_operand_a_o(cheri_alu_operand_a),
       .alu_operand_b_o(cheri_alu_operand_b),
+      .alu_operator_o(cheri_alu_operator),
       .alu_result_i(alu_adder_result_ex_o),
       .exceptions_a_o(cheri_exc_a),
       .exceptions_b_o(cheri_exc_b)
@@ -224,6 +230,7 @@ module ibex_ex_block #(
   // ALU output valid in same cycle, multiplier/divider may require multiple cycles
   assign ex_valid_o = multdiv_en ? multdiv_valid : 1'b1;
 
+// TODO undo this
 logic [`CAP_SIZE-1:0] cheri_jump_addr;
 module_wrap64_getAddr module_getAddr_a (
     .wrap64_getAddr_cap(cheri_result),

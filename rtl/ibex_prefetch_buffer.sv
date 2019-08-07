@@ -23,6 +23,13 @@
  * Prefetch Buffer that caches instructions. This cuts overly long critical
  * paths to the instruction cache.
  */
+
+
+ // TODO in order to make this use a PCC:
+ //   this needs to take in a pcc as an input. it can then take the address of the pcc and
+ //   use that in the same way it would use a regular PC.
+ //   for the output, it needs to create a new pcc from the input pcc, so that it keeps the same
+ //   access permissions
 module ibex_prefetch_buffer (
     input  logic        clk_i,
     input  logic        rst_ni,
@@ -36,13 +43,14 @@ module ibex_prefetch_buffer (
     input  logic        ready_i,
     output logic        valid_o,
     output logic [31:0] rdata_o,
-    output logic [`CAP_SIZE:0] addr_o,
+    output logic [`CAP_SIZE-1:0] addr_o,
 
 
     // goes to instruction memory / instruction cache
     output logic        instr_req_o,
     input  logic        instr_gnt_i,
-    output logic [`CAP_SIZE:0] instr_addr_o,
+    output logic [31:0] instr_addr_o,
+    output logic [`CAP_SIZE:0] instr_cap_o,
     input  logic [31:0] instr_rdata_i,
     input  logic        instr_rvalid_i,
 
@@ -56,13 +64,17 @@ module ibex_prefetch_buffer (
 
   pf_fsm_e pf_fsm_cs, pf_fsm_ns;
 
-  logic [`CAP_SIZE-1:0] instr_addr_q, fetch_addr;
-  logic [`CAP_SIZE-1:0] instr_addr, instr_addr_w_aligned;
+  logic [31:0] instr_addr_q, fetch_addr;
+  logic [31:0] instr_addr, instr_addr_w_aligned;
   logic        addr_valid;
 
   logic        fifo_valid;
   logic        fifo_ready;
   logic        fifo_clear;
+
+  logic [31:0] addr_fifo;
+
+  //logic [`CAP_SIZE-1:0] out_cap_o;
 
   ////////////////////////////
   // Prefetch buffer status //
@@ -80,6 +92,7 @@ module ibex_prefetch_buffer (
 
       .clear_i               ( fifo_clear        ),
 
+      // TODO remove caps?
       .in_addr_i             ( instr_addr_q      ),
       .in_rdata_i            ( instr_rdata_i     ),
       .in_valid_i            ( fifo_valid        ),
@@ -89,7 +102,7 @@ module ibex_prefetch_buffer (
       .out_valid_o           ( valid_o           ),
       .out_ready_i           ( ready_i           ),
       .out_rdata_o           ( rdata_o           ),
-      .out_addr_o            ( addr_o            ),
+      .out_addr_o            ( addr_fifo            ),
 
       .out_valid_stored_o    (                   )
   );
@@ -122,7 +135,8 @@ module ibex_prefetch_buffer (
         instr_req_o = 1'b0;
 
         if (branch_i) begin
-          instr_addr = addr_i;
+          // TODO addr_i will become a PCC so i will need to get its address instead
+          instr_addr = addr_i_getAddr_o;
         end
 
         if (req_i && (fifo_ready || branch_i )) begin
@@ -141,7 +155,7 @@ module ibex_prefetch_buffer (
         instr_req_o = 1'b1;
 
         if (branch_i) begin
-          instr_addr = addr_i;
+          instr_addr = addr_i_getAddr_o;
           addr_valid = 1'b1;
         end
 
@@ -154,7 +168,7 @@ module ibex_prefetch_buffer (
         instr_addr = fetch_addr;
 
         if (branch_i) begin
-          instr_addr = addr_i;
+          instr_addr = addr_i_getAddr_o;
         end
 
         if (req_i && (fifo_ready || branch_i)) begin
@@ -192,7 +206,7 @@ module ibex_prefetch_buffer (
         instr_addr = instr_addr_q;
 
         if (branch_i) begin
-          instr_addr = addr_i;
+          instr_addr = addr_i_getAddr_o;
           addr_valid = 1'b1;
         end
 
@@ -233,6 +247,43 @@ module ibex_prefetch_buffer (
   /////////////////
   // TODO pcc stuff
   assign instr_addr_w_aligned = {instr_addr[31:2], 2'b00};
+
+  // TODO set this to a capability
+  //assign instr_cap_o         =  instr_addr_w_aligned;
   assign instr_addr_o         =  instr_addr_w_aligned;
+
+
+// TODO change to offset
+  always_comb begin
+    pcc_setAddr1_i = addr_fifo;
+    addr_o = pcc_setAddr1_o[`CAP_SIZE-1:0];
+  end
+
+  always_comb begin
+    pcc_setAddr2_i = instr_addr_w_aligned;
+    instr_cap_o = pcc_setAddr2_o[`CAP_SIZE-1:0];
+  end
+
+
+logic [31:0] addr_i_getAddr_o;
+module_wrap64_getAddr module_getAddr_addr_i (
+    .wrap64_getAddr_cap(addr_i),
+    .wrap64_getAddr(addr_i_getAddr_o));
+
+// TODO these should not have addr_i in them
+logic [`CAP_SIZE-1:0] pcc_setAddr1_i;
+logic [`CAP_SIZE:0] pcc_setAddr1_o;
+module_wrap64_setAddr pcc_setAddr1 (
+                .wrap64_setAddr_cap(addr_i),
+			    .wrap64_setAddr_addr(pcc_setAddr1_i),
+			    .wrap64_setAddr(pcc_setAddr1_o));
+
+logic [`CAP_SIZE-1:0] pcc_setAddr2_i;
+logic [`CAP_SIZE:0] pcc_setAddr2_o;
+module_wrap64_setAddr pcc_setAddr2 (
+                .wrap64_setAddr_cap(addr_i),
+			    .wrap64_setAddr_addr(pcc_setAddr2_i),
+			    .wrap64_setAddr(pcc_setAddr2_o));
+
 
 endmodule

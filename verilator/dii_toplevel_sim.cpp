@@ -10,6 +10,7 @@
 #include <vector>
 #include <unistd.h>
 #include "socket_packet_utils.h"
+#include <stdlib.h>
 
 
 struct RVFI_DII_Execution_Packet {
@@ -80,6 +81,8 @@ double sc_time_stamp() {
 // The RVFI trace is then sent back
 int main(int argc, char** argv, char** env) {
 
+
+
     if (argc != 3) {
         std::cerr << "wrong number of args" << std::endl;
         exit(-1);
@@ -96,7 +99,14 @@ int main(int argc, char** argv, char** env) {
     trace_obj.open("vlt_d.vcd");
     #endif
 
-    uint8_t memory[65536] = {0};
+    uint8_t *memory = (uint8_t *) malloc(0x2000000);
+    if (memory == NULL) {
+        std::cout << "memory is null" << std::endl;
+    }
+    bool *tags = (bool *) malloc(0x2000000/8);
+    if (tags == NULL) {
+        std::cout << "tags is null" << std::endl;
+    }
 
     //std::cout << "init socket" << std::endl;
     unsigned long long socket = serv_socket_create(argv[1], std::atoi(argv[2]));
@@ -116,7 +126,7 @@ int main(int argc, char** argv, char** env) {
 
     top->avm_instr_readdatavalid = 0;
     top->avm_instr_waitrequest = 0;
-         
+
     top->rst_i = 0;
 
     top->eval();
@@ -130,30 +140,36 @@ int main(int argc, char** argv, char** env) {
     std::vector<RVFI_DII_Execution_Packet> returntrace;
     while (1) {
         //std::cout << "main loop begin" << std::endl;
-         
+
         // send back execution trace
         // send back execution trace if the number of instructions that have come out is equal to the
         // number that have gone in
-        std::cout << "send" << std::endl;
+        //std::cout << "send" << std::endl;
         if (returntrace.size() > 0 && out_count == in_count) {
+            std::cout << "start sending" << std::endl;
             for (int i = 0; i < returntrace.size(); i++) {
+                usleep(300);
+                std::cout << i << std::endl;
                 // loop to make sure that the packet has been properly sent
                 while (
                     !serv_socket_putN(socket, sizeof(RVFI_DII_Execution_Packet), (unsigned int *) &(returntrace[i]))
                 ) {
+                    std::cout << "send loop" << std::endl;
                     // empty
                 }
+                std::cout << std::dec << i << " finished"  << std::endl;
             }
-           
+
             returntrace.clear();
+            std::cout << "finish sending" << std::endl;
         }
 
         // set up a packet and try to receive packets if the number of instructions that we've put in is
         // equal to the number of instructions we've received from TestRIG
         RVFI_DII_Instruction_Packet *packet;
-        std::cout << "receive" << std::endl;
+        //std::cout << "receive" << std::endl;
         while (in_count >= received) {
-            std::cout << "in_count: " << in_count << " received: " << received << std::endl;
+            //std::cout << "in_count: " << in_count << " received: " << received << std::endl;
 
             // try to receive a packet
             serv_socket_getN((unsigned int *) recbuf, socket, sizeof(RVFI_DII_Instruction_Packet));
@@ -164,7 +180,7 @@ int main(int argc, char** argv, char** env) {
                 //for (int i = 0; i < sizeof(recbuf); i++) {
                 //    std::cout << (int) recbuf[i] << " ";
                 //}
-                //std::cout << std::endl; 
+                //std::cout << std::endl;
 
                 packet = (RVFI_DII_Instruction_Packet *) recbuf;
 
@@ -178,22 +194,22 @@ int main(int argc, char** argv, char** env) {
             }
 
             // sleep for 10ms before trying to receive another instruction
-            usleep(10000);
+            usleep(1000);
         }
-      
+
 
         // need to clock the core while there are still instructions in the buffer
-        //std::cout << "clock" << std::endl;
+        std::cout << "clock" << std::endl;
         if ((in_count <= received) && received > 0 && ((in_count - out_count > 0) || in_count == 0 || (out_count == in_count && received > in_count))) {
 
             //std::cout << "in_count: " << in_count << " out_count: " << out_count << " diff: " << in_count - out_count << std::endl;
-            /*
+            
             if (in_count - out_count > 0) {
                 for (int i = out_count + 1; i <= in_count; i++) {
                     std::cout << "next " << i << ": " << std::hex << instructions[i].dii_insn << std::endl;
                 }
             }
-            */
+            
 
 
             // read rvfi data and add packet to list of packets to send
@@ -221,6 +237,7 @@ int main(int argc, char** argv, char** env) {
                     .rvfi_intr = top->rvfi_intr
                 };
 
+                std::cout << "mem_wdata: " << std::hex << execpacket.rvfi_mem_wdata << std::endl;
                 returntrace.push_back(execpacket);
 
                 out_count++;
@@ -233,12 +250,14 @@ int main(int argc, char** argv, char** env) {
                 // currently, in order for this to work we need to remove illegal_insn from the assignment
                 // to rvfi_trap since when the core is first started the instruction data is garbage so
                 // this is high
-                if (top->rvfi_trap) {
+                if (top->rvfi_valid && top->rvfi_trap) {
                     // if there has been a trap, then we know that we just tried to do a load/store
                     // we need to go back to out_count
                     // THIS BREAKS ONCE CHERI IS ADDED
                     // CHERI USES THE TRAP SIGNAL A LOT BUT ITS TRAPS TAKE FEWER CYCLES TO RECOVER FROM
-                    in_count = out_count + ((top->rvfi_insn & 0x0000007f) == 0x0000005b ? 1 : 0);
+                    //in_count = out_count + ((top->rvfi_insn & 0x0000007f) == 0x0000005b ? 1 : 0);
+                    in_count = out_count + (((top->rvfi_insn & 0x0000007f) == 0x0000005b)
+                                           && ((top->rvfi_insn & 0xfff07000) != 0xfec00000) ? 0 : 0);
                 } else {
                     //std::cout << "cmd: " << (instructions[out_count].dii_cmd ? "instr" : "rst") << std::endl;
                     if (!instructions[out_count].dii_cmd) {
@@ -276,17 +295,24 @@ int main(int argc, char** argv, char** env) {
                 } else {
                     top->avm_instr_readdatavalid = 0;
                     top->avm_instr_waitrequest = 0;
-                }        
-            } else if (in_count - out_count == 0 && in_count < received) {
-                top->boot_addr_i = 0x80000000;
-                top->rst_i = 1;
-
-                // clear memory
-                for (int i = 0; i < (sizeof(memory)/sizeof(memory[0])); i++) {
-                    memory[i] = 0;
                 }
-                in_count++;
+            } else {
+                if (in_count - out_count == 0 && in_count < received) {
                 top->avm_instr_readdatavalid = 0;
+                    top->boot_addr_i = 0x80000000;
+                    top->rst_i = 1;
+
+                    // clear memory
+                    for (int i = 0; i < 0x2000000/*(sizeof(memory)/sizeof(memory[0]))*/; i++) {
+                        memory[i] = 0;
+                    }
+
+                    for (int i = 0; i < (0x2000000/8)/*(sizeof(tags)/sizeof(tags[0]))*/; i++) {
+                        tags[i] = 0;
+                    }
+
+                    in_count++;
+                }
             }
 
 
@@ -317,6 +343,8 @@ int main(int argc, char** argv, char** env) {
 
                 returntrace.push_back(execpacket);
 
+                std::cout << "mem_wdata: " << std::hex << execpacket.rvfi_mem_wdata << std::endl;
+
                 out_count++;
             }
 
@@ -328,48 +356,78 @@ int main(int argc, char** argv, char** env) {
                 // TestRIG specifies that byte addresses must be between 0x80000000 and 0x80008000
                 // our avalon wrapper divides the byte address by 4 in order to get a word address
                 // so we need to check for addresses between 0x20003fff and 0x20000000
-                if (address > 0x20003fff || address < 0x20000000) {
+                if (address > 0x207fffff || address < 0x20000000) {
                     // the core tried to read from an address outside the specified range
                     // set the signals appropriately
                     top->avm_main_response = 0b11;
-                    top->avm_main_readdata = 0xdeadbeef & belu[top->avm_main_byteenable];
+                    // TODO comment this
+                    top->avm_main_readdata[0] = 0xdeadbeef & belu[top->avm_main_byteenable & 0xf];
+                    top->avm_main_readdata[1] = 0xdeadbeef & belu[(top->avm_main_byteenable) >> 4];
+                    top->avm_main_readdata[2] = 0;
                     top->avm_main_readdatavalid = 1;
                 } else {
                     // the core tried to read from an address within the specified range
                     // we need to get the correct data from memory
 
                     // translate the address so it is between 0x0 and 0x00003fff
-                    address = address & 0x00003fff;
+                    // TODO change this to a #defined value
+                    address = address & 0x007fffff;
 
                     // convert the address to a byte address
                     address <<= 2;
 
                     // we want to start with the highest byte address for this word since our
                     // memory is little endian
-                    address += 3;
+                    address += 7;
 
                     // for each bit in the byteenable, check if we should get that byte from memory
                     // if not, set it to 0
-                    unsigned int data = 0;
-                    data |= ((top->avm_main_byteenable>>3) & 0x1) ? memory[address] : 0;
+                    unsigned int data[3] = {0};
+                    // TODO clean this up into a for loop
+                    data[1] |= ((top->avm_main_byteenable>>7) & 0x1) ? memory[address] : 0;
 
                     address--;
-                    data<<=8;
+                    data[1]<<=8;
 
-                    data |= ((top->avm_main_byteenable>>2) & 0x1) ? memory[address] : 0;
-
-                    address--;
-                    data<<=8;
-                    
-                    data |= ((top->avm_main_byteenable>>1) & 0x1) ? memory[address] : 0;
+                    data[1] |= ((top->avm_main_byteenable>>6) & 0x1) ? memory[address] : 0;
 
                     address--;
-                    data<<=8;
+                    data[1]<<=8;
 
-                    data |= ((top->avm_main_byteenable>>0) & 0x1) ? memory[address] : 0;
+                    data[1] |= ((top->avm_main_byteenable>>5) & 0x1) ? memory[address] : 0;
+
+                    address--;
+                    data[1]<<=8;
+
+                    data[1] |= ((top->avm_main_byteenable>>4) & 0x1) ? memory[address] : 0;
+
+                    address--;
+                    data[1]<<=8;
+
+                    data[0] |= ((top->avm_main_byteenable>>3) & 0x1) ? memory[address] : 0;
+
+                    address--;
+                    data[0]<<=8;
+
+                    data[0] |= ((top->avm_main_byteenable>>2) & 0x1) ? memory[address] : 0;
+
+                    address--;
+                    data[0]<<=8;
+
+                    data[0] |= ((top->avm_main_byteenable>>1) & 0x1) ? memory[address] : 0;
+
+                    address--;
+                    data[0]<<=8;
+
+                    data[0] |= ((top->avm_main_byteenable>>0) & 0x1) ? memory[address] : 0;
+
+                    // set the tag
+                    data[2] = tags[address/8];
 
                     // set the signals appropriately
-                    top->avm_main_readdata = data;
+                    top->avm_main_readdata[0] = data[0];
+                    top->avm_main_readdata[1] = data[1];
+                    top->avm_main_readdata[2] = data[2];
                     top->avm_main_readdatavalid = 1;
                     top->avm_main_response = 0b00;
                 }
@@ -384,7 +442,7 @@ int main(int argc, char** argv, char** env) {
                 // TestRIG specifies that byte addresses must be between 0x80000000 and 0x80008000
                 // our avalon wrapper divides the byte address by 4 in order to get a word address
                 // so we need to check for addresses between 0x20003fff and 0x20000000
-                if (address > 0x20003fff || address < 0x20000000) {
+                if (address > 0x207fffff || address < 0x20000000) {
                     // the core tried to write to an address outside the specified range
                     // set the signals appropriately
                     top->avm_main_response = 0b11;
@@ -393,29 +451,52 @@ int main(int argc, char** argv, char** env) {
                     // the core tried to read from an address within the specified range
 
                     // translate the address so it is between 0x0 and 0x00003fff
-                    address = address & 0x00003fff;
+                    address = address & 0x007fffff;
 
                     // get the data from the core
-                    unsigned int data = top->avm_main_writedata;
+                    unsigned int data[3] = {0};
+                    data[0] = top->avm_main_writedata[0];
+                    data[1] = top->avm_main_writedata[1];
+                    data[2] = top->avm_main_writedata[2];
 
                     // convert the address to a byte address
                     address<<=2;
 
+                    // set the tag
+                    tags[address/8] = data[2];
+
                     // we want to only change the memory values for which byteenable is high
                     // if byteenable is low, preserve that byte in memory
-                    memory[address] = (top->avm_main_byteenable & 0x1) ? data : memory[address];
+                    memory[address] = (top->avm_main_byteenable & 0x1) ? data[0] : memory[address];
                     address++;
-                    data>>=8;
+                    data[0]>>=8;
 
-                    memory[address] = ((top->avm_main_byteenable>>1) & 0x1) ? data : memory[address];
+                    memory[address] = ((top->avm_main_byteenable>>1) & 0x1) ? data[0] : memory[address];
                     address++;
-                    data>>=8;
+                    data[0]>>=8;
 
-                    memory[address] = ((top->avm_main_byteenable>>2) & 0x1) ? data : memory[address];
+                    memory[address] = ((top->avm_main_byteenable>>2) & 0x1) ? data[0] : memory[address];
                     address++;
-                    data>>=8;
+                    data[0]>>=8;
 
-                    memory[address] = ((top->avm_main_byteenable>>3) & 0x1) ? data : memory[address];
+                    memory[address] = ((top->avm_main_byteenable>>3) & 0x1) ? data[0] : memory[address];
+                    address++;
+                    // TODO this next line can be skipped
+                    data[0]>>=8;
+
+                    memory[address] = ((top->avm_main_byteenable>>4) & 0x1) ? data[1] : memory[address];
+                    address++;
+                    data[1]>>=8;
+
+                    memory[address] = ((top->avm_main_byteenable>>5) & 0x1) ? data[1] : memory[address];
+                    address++;
+                    data[1]>>=8;
+
+                    memory[address] = ((top->avm_main_byteenable>>6) & 0x1) ? data[1] : memory[address];
+                    address++;
+                    data[1]>>=8;
+
+                    memory[address] = ((top->avm_main_byteenable>>7) & 0x1) ? data[1] : memory[address];
 
 
                     // set output signals appropriately
@@ -424,7 +505,7 @@ int main(int argc, char** argv, char** env) {
                 }
             }
 
-            
+
             if (!top->avm_main_write && !top->avm_main_read) {
                 top->avm_main_readdatavalid = 0;
             }
@@ -459,7 +540,7 @@ int main(int argc, char** argv, char** env) {
                 break;
             }
         }
-    
+
     }
 
     std::cout << "finished" << std::endl << std::flush;

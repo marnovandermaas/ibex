@@ -31,17 +31,17 @@ module ibex_fetch_fifo (
     input  logic        clear_i,          // clears the contents of the fifo
 
     // input port
-    input  logic [`CAP_SIZE-1:0] in_addr_i,
+    // this doesn't need to be a capability since it's internal to the prefetch buffer and fetch fifo system
+    input  logic [31:0] in_addr_i,
     input  logic [31:0] in_rdata_i,
     input  logic        in_valid_i,
     output logic        in_ready_o,
-
 
     // output port
     output logic        out_valid_o,
     input  logic        out_ready_i,
     output logic [31:0] out_rdata_o,
-    output logic [`CAP_SIZE-1:0] out_addr_o,
+    output logic [31:0] out_addr_o,
 
     output logic        out_valid_stored_o // same as out_valid_o, except that if something is
                                            // incoming now it is not included. This signal is
@@ -51,12 +51,12 @@ module ibex_fetch_fifo (
   localparam int unsigned DEPTH = 3; // must be 3 or greater
 
   // index 0 is used for output
-  logic [DEPTH-1:0] [`CAP_SIZE-1:0]  addr_n,    addr_int,    addr_q;
-  logic [DEPTH-1:0] [`CAP_SIZE-1:0]  rdata_n,   rdata_int,   rdata_q;
+  logic [DEPTH-1:0] [31:0]  addr_n,    addr_int,    addr_q;
+  logic [DEPTH-1:0] [31:0]  rdata_n,   rdata_int,   rdata_q;
   logic [DEPTH-1:0]         valid_n,   valid_int,   valid_q;
 
   //logic             [31:2]  addr_next;
-  logic             [`CAP_SIZE-1:0]  addr_next;
+  logic             [31:0]  addr_next;
   logic             [31:0]  rdata, rdata_unaligned;
   logic                     valid, valid_unaligned;
 

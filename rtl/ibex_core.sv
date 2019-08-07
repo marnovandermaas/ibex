@@ -28,6 +28,7 @@
 // TODO put this in the makefile
 `define CAP_SIZE 93
 `define EXCEPTION_SIZE 22
+`define INTEGER_SIZE 32
 
 /*
 parameter CAP_SIZE  = `CAP_SIZE;
@@ -79,10 +80,10 @@ module ibex_core #(
     input  logic        data_gnt_i,
     input  logic        data_rvalid_i,
     output logic        data_we_o,
-    output logic [3:0]  data_be_o,
+    output logic [7:0]  data_be_o,
     output logic [31:0] data_addr_o,
-    output logic [31:0] data_wdata_o,
-    input  logic [31:0] data_rdata_i,
+    output logic [64:0] data_wdata_o,
+    input  logic [64:0] data_rdata_i,
     input  logic        data_err_i,
 
     // Interrupt inputs
@@ -115,10 +116,10 @@ module ibex_core #(
     output logic [31:0] rvfi_pc_rdata,
     output logic [31:0] rvfi_pc_wdata,
     output logic [31:0] rvfi_mem_addr,
-    output logic [ 3:0] rvfi_mem_rmask,
-    output logic [ 3:0] rvfi_mem_wmask,
-    output logic [31:0] rvfi_mem_rdata,
-    output logic [31:0] rvfi_mem_wdata,
+    output logic [ 7:0] rvfi_mem_rmask,
+    output logic [ 7:0] rvfi_mem_wmask,
+    output logic [63:0] rvfi_mem_rdata,
+    output logic [63:0] rvfi_mem_wdata,
 `endif
 
 `ifdef DII
@@ -139,8 +140,10 @@ module ibex_core #(
   logic [15:0] instr_rdata_c_id;       // Compressed instruction sampled inside IF stage
   logic        instr_is_compressed_id;
   logic        illegal_c_insn_id;      // Illegal compressed instruction sent to ID stage
-  logic [31:0] pc_if;                  // Program counter in IF stage
-  logic [31:0] pc_id;                  // Program counter in ID stage
+  //logic [31:0] pc_if;                  // Program counter in IF stage
+  logic [`CAP_SIZE-1:0] pc_if;                  // Program counter in IF stage
+  //logic [31:0] pc_id;                  // Program counter in ID stage
+  logic [`CAP_SIZE-1:0] pc_id;                  // Program counter in ID stage
 
   logic        instr_valid_clear;
   logic        pc_set;
@@ -155,9 +158,12 @@ module ibex_core #(
   // LSU signals
   logic        lsu_addr_incr_req;
   logic [31:0] lsu_addr_last;
+  logic [`CAP_SIZE-1:0] lsu_cap_last;
+  logic [`CAP_SIZE-1:0] lsu_cap;
 
   // Jump and branch target and decision (EX->IF)
-  logic [31:0] jump_target_ex;
+  //logic [31:0] jump_target_ex;
+  logic [`CAP_SIZE-1:0] jump_target_ex;
   logic        branch_decision;
 
   logic        ctrl_busy;
@@ -173,7 +179,7 @@ module ibex_core #(
   logic [31:0] alu_operand_b_ex;
 
   logic [31:0] alu_adder_result_ex;    // Used to forward computed address to LSU
-  logic [`CAP_SIZE - 1:0] regfile_wdata_ex;
+  logic [`CAP_SIZE-1:0] regfile_wdata_ex;
 
 
     // CHERI
@@ -183,12 +189,13 @@ module ibex_core #(
     cheri_store_funct5_e      cheri_store_opcode;
     cheri_load_funct5_e       cheri_load_opcode;
     cheri_s_a_d_funct5_e      cheri_sad_opcode;
-    logic [`CAP_SIZE -1:0]      cheri_operand_a;
-    logic [`CAP_SIZE -1:0]      cheri_operand_b;
+    logic [`CAP_SIZE-1:0]      cheri_operand_a;
+    logic [`CAP_SIZE-1:0]      cheri_operand_b;
 
-    logic [`EXCEPTION_SIZE -1:0] cheri_exc_a;
-    logic [`EXCEPTION_SIZE -1:0] cheri_exc_b;
+    logic [`EXCEPTION_SIZE-1:0] cheri_exc_a;
+    logic [`EXCEPTION_SIZE-1:0] cheri_exc_b;
     logic                  cheri_wrote_cap;
+    logic cap_jump;
 
 
   // Multiplier Control
@@ -200,6 +207,7 @@ module ibex_core #(
   logic [31:0] multdiv_operand_b_ex;
 
   // CSR control
+  // TODO add SCRs
   logic        csr_access;
   csr_op_e     csr_op;
   csr_num_e    csr_addr;
@@ -215,8 +223,8 @@ module ibex_core #(
   logic        data_sign_ext_ex;
   logic [1:0]  data_reg_offset_ex;
   logic        data_req_ex;
-  logic [31:0] data_wdata_ex;
-  logic [31:0] regfile_wdata_lsu;
+  logic [`CAP_SIZE-1:0] data_wdata_ex;
+  logic [`CAP_SIZE-1:0] regfile_wdata_lsu;
 
   // stall control
   logic        id_in_ready;
@@ -258,6 +266,12 @@ module ibex_core #(
   // for RVFI
   logic        illegal_insn_id, unused_illegal_insn_id; // ID stage sees an illegal instruction
 
+
+  // TODO misc stuff to look at later
+  logic [`CAP_SIZE-1:0] instr_auth_cap;
+  logic [`INTEGER_SIZE-1:0] data_addr;
+  logic [`CAP_SIZE-1:0] data_auth_cap;
+
   // RISC-V Formal Interface signals
 `ifdef RVFI
   logic [31:0] rvfi_insn_id;
@@ -278,11 +292,11 @@ module ibex_core #(
   logic        rvfi_rd_we_id;
   logic        rvfi_insn_new_d;
   logic        rvfi_insn_new_q;
-  logic [3:0]  rvfi_mem_mask_int;
-  logic [31:0] rvfi_mem_rdata_d;
-  logic [31:0] rvfi_mem_rdata_q;
-  logic [31:0] rvfi_mem_wdata_d;
-  logic [31:0] rvfi_mem_wdata_q;
+  logic [7:0]  rvfi_mem_mask_int;
+  logic [63:0] rvfi_mem_rdata_d;
+  logic [63:0] rvfi_mem_rdata_q;
+  logic [63:0] rvfi_mem_wdata_d;
+  logic [63:0] rvfi_mem_wdata_q;
   logic [31:0] rvfi_mem_addr_d;
   logic [31:0] rvfi_mem_addr_q;
 `endif
@@ -291,6 +305,7 @@ module ibex_core #(
   assign perf_imiss_o = perf_imiss;
 `endif
 
+  // TODO remove this debug signal
   logic [31:0] pc_next;
 
   //////////////////////
@@ -343,6 +358,8 @@ module ibex_core #(
 
       // instruction cache interface
       .instr_req_o              ( instr_req_o            ),
+      // TODO make this useful for checking pc bounds
+      .instr_cap_o(instr_cap),
       .instr_addr_o             ( instr_addr_o           ),
       .instr_gnt_i              ( instr_gnt_i            ),
       .instr_rvalid_i           ( instr_rvalid_i         ),
@@ -367,11 +384,13 @@ module ibex_core #(
 
       // jump targets
       .jump_target_ex_i         ( jump_target_ex         ),
+      .cap_jump_i(cap_jump),
 
       // CSRs
       .csr_mepc_i               ( csr_mepc               ), // exception return address
       .csr_depc_i               ( csr_depc               ), // debug return address
       .csr_mtvec_o              ( csr_mtvec              ), // trap-vector base address
+      .scr_mtcc_i (scr_mtcc),
 
       // pipeline stalls
       .id_in_ready_i            ( id_in_ready            ),
@@ -452,7 +471,10 @@ module ibex_core #(
       .cheri_exc_a_i(cheri_exc_a),
       .cheri_exc_b_i(cheri_exc_b),
       .cheri_exc_o(cheri_exc),
+      .cheri_exc_mem_i(cheri_data_exc),
       .cheri_wrote_cap_i(cheri_wrote_cap),
+
+      .use_cap_base_o(use_cap_base),
 
 
 
@@ -467,6 +489,14 @@ module ibex_core #(
       .csr_mtval_o                  ( csr_mtval              ),
       .illegal_csr_insn_i           ( illegal_csr_insn_id    ),
 
+      // SCR interface
+      .scr_access_o (scr_access),
+      .scr_op_o (scr_op),
+      .scr_rdata_i (scr_rdata),
+
+      .scr_ddc_i (scr_ddc),
+      .cheri_scr_exc_i(scr_exc),
+
       // LSU
       .data_req_ex_o                ( data_req_ex            ), // to load store unit
       .data_we_ex_o                 ( data_we_ex             ), // to load store unit
@@ -480,6 +510,9 @@ module ibex_core #(
 
       .lsu_load_err_i               ( lsu_load_err           ),
       .lsu_store_err_i              ( lsu_store_err          ),
+
+      .mem_cap_o(mem_cap),
+      .mem_cap_access_o(mem_cap_access),
 
       // Interrupt Signals
       .irq_i                        ( irq_i                  ), // incoming interrupts
@@ -561,6 +594,7 @@ module ibex_core #(
 
       .jump_target_o              ( jump_target_ex         ), // to IF
       .branch_decision_o          ( branch_decision        ), // to ID
+      .cap_jump_o(cap_jump),
 
       .ex_valid_o                 ( ex_valid               )
   );
@@ -568,6 +602,9 @@ module ibex_core #(
   /////////////////////
   // Load/store unit //
   /////////////////////
+
+  // TODO find this a better home
+  logic use_cap_base;
 
   ibex_load_store_unit  load_store_unit_i (
       .clk_i                 ( clk                 ),
@@ -581,9 +618,9 @@ module ibex_core #(
 
       .data_addr_o           ( data_addr_o         ),
       .data_we_o             ( data_we_o           ),
-      .data_be_o             ( data_be_o           ),
-      .data_wdata_o          ( data_wdata_o        ),
-      .data_rdata_i          ( data_rdata_i        ),
+      .data_be_o             ( data_be           ),
+      .data_wdata_o          ( data_wdata        ),
+      .data_rdata_i          ( data_rdata        ),
 
       // signals to/from ID/EX stage
       .data_we_ex_i          ( data_we_ex          ),
@@ -596,6 +633,9 @@ module ibex_core #(
       .data_req_ex_i         ( data_req_ex         ),
 
       .adder_result_ex_i     ( alu_adder_result_ex ),
+
+      .data_cap_i (mem_cap),
+      .use_cap_base_i (use_cap_base),
 
       .addr_incr_req_o       ( lsu_addr_incr_req   ),
       .addr_last_o           ( lsu_addr_last       ),
@@ -614,10 +654,21 @@ module ibex_core #(
   /////////////////////////////////////////
 
   assign csr_wdata  = alu_operand_a_ex;
+  assign scr_wdata  = cheri_operand_a;
   assign csr_addr   = csr_num_e'(csr_access ? alu_operand_b_ex[11:0] : 12'b0);
+  assign scr_addr   = scr_num_e'(scr_access ? cheri_operand_b : '0);
 
   assign perf_load  = data_req_o & data_gnt_i & (~data_we_o);
   assign perf_store = data_req_o & data_gnt_i & data_we_o;
+
+  logic [`CAP_SIZE-1:0] scr_ddc;
+  logic [`CAP_SIZE-1:0] scr_wdata;
+  logic [`CAP_SIZE-1:0] scr_rdata;
+  logic [`CAP_SIZE-1:0] scr_mtcc;
+  logic [4:0] scr_addr;
+  scr_op_e scr_op;
+  logic scr_access;
+  logic scr_exc;
 
   ibex_cs_registers #(
       .MHPMCounterNum   ( MHPMCounterNum   ),
@@ -638,6 +689,17 @@ module ibex_core #(
       .csr_wdata_i             ( csr_wdata              ),
       .csr_op_i                ( csr_op                 ),
       .csr_rdata_o             ( csr_rdata              ),
+
+      // Interface to SCRs
+      .scr_access_i (scr_access),
+      .scr_addr_i (scr_addr),
+      .scr_wdata_i (scr_wdata),
+      .scr_op_i (scr_op),
+      .scr_rdata_o (scr_rdata),
+      .exc_o(scr_exc),
+
+      .scr_ddc_o (scr_ddc),
+      .scr_mtcc_o(scr_mtcc),
 
       // Interrupt related control signals
       .m_irq_enable_o          ( m_irq_enable           ),
@@ -678,6 +740,70 @@ module ibex_core #(
       .lsu_busy_i              ( lsu_busy               )
   );
 
+  /////////////////////////////
+  // Memory access checkers
+  ///////
+
+  logic [`EXCEPTION_SIZE-1:0] cheri_data_exc;
+  logic [`EXCEPTION_SIZE-1:0] cheri_instr_exc;
+  logic [`CAP_SIZE-1:0] instr_cap;
+  logic [`CAP_SIZE-1:0] mem_cap;
+  logic mem_cap_access;
+  logic [`CAP_SIZE-1:0] data_rdata;
+  logic [`CAP_SIZE-1:0] data_wdata;
+  logic [7:0] data_be;
+
+  ibex_cheri_memchecker #(
+      .DATA_MEM(1'b1)
+  ) data_checker (
+      .cap_base_i(mem_cap),
+      // TODO check this is being set correctly
+      // TODO this is wrong - we might try to do an unaligned access, in which case ibex will do two aligned
+      // ones. the data type will not change between accesses, but the second access will be reading something that
+      // is smaller than the first one. this means that the memchecker could throw an exception where one is not
+      // supposed to be thrown
+      .address_i(data_addr_o),
+      .data_type_i(data_type_ex),
+      .write_i(data_we_o),
+      .access_capability_i(mem_cap_access),
+      .mem_data_i(data_rdata_i),
+      .lsu_data_i(data_wdata),
+      .data_be_i(data_be),
+
+      .data_be_o(data_be_o),
+      .mem_data_o(data_wdata_o),
+      .lsu_data_o(data_rdata),
+      .cheri_mem_exc_o(cheri_data_exc)
+  );
+
+  ibex_cheri_memchecker #(
+      .DATA_MEM(1'b0)
+  ) instr_checker (
+      // TODO this breaks when we try to jump since we're fetching an instruction which we wanted to fetch using
+      // a different PCC
+      .cap_base_i(instr_cap),
+      // we expect the capability we get above to always point to the address we want, so we
+      // hardwire the offset to 0
+      .address_i(instr_addr_o),
+      // TODO if we want to properly implement compressed instructions we're going to have to pass in
+      // a proper type
+      // for now just always say word
+      .data_type_i(2'b0),
+      .data_be_i(),
+      .data_be_o(),
+
+      // we never write instructions
+      .write_i('0),
+      // likewise, we never read capabilities from the instruction stream
+      .access_capability_i('0),
+      .mem_data_i(),
+      .lsu_data_i(),
+
+      .mem_data_o(),
+      .lsu_data_o(),
+      .cheri_mem_exc_o(cheri_instr_exc)
+  );
+
 `ifdef RVFI
   always_ff @(posedge clk or negedge rst_ni) begin
     if (!rst_ni) begin
@@ -704,7 +830,7 @@ module ibex_core #(
       rvfi_mem_addr          <= '0;
     end else begin
       rvfi_halt              <= '0;
-      rvfi_trap      <= lsu_store_err || lsu_load_err || cheri_exc;
+      rvfi_trap      <= lsu_store_err || lsu_load_err || cheri_exc || illegal_insn_id;
       rvfi_intr              <= irq_ack_o;
       rvfi_order             <= rvfi_order + rvfi_valid;
       rvfi_insn              <= rvfi_insn_id;
@@ -713,9 +839,9 @@ module ibex_core #(
       rvfi_rs1_addr          <= rvfi_rs1_addr_id;
       rvfi_rs2_addr          <= rvfi_rs2_addr_id;
       rvfi_pc_rdata          <= pc_id;
-      rvfi_pc_wdata  <= (pc_set || lsu_load_err || lsu_store_err) ? (pc_mux_id == 3'b001 ? jump_target_ex : pc_next) : pc_if;
+      rvfi_pc_wdata  <= (pc_set || lsu_load_err || lsu_store_err || illegal_insn_id) ? (pc_mux_id == 3'b001 ? jump_target_ex : pc_next) : pcc_getAddr_o;
       rvfi_mem_rmask         <= rvfi_mem_mask_int;
-      rvfi_mem_wmask         <= data_we_o ? rvfi_mem_mask_int : 4'b0000;
+      rvfi_mem_wmask         <= data_we_o ? rvfi_mem_mask_int : 8'b0000;
       rvfi_valid             <= instr_ret;
       rvfi_rs1_rdata         <= rvfi_rs1_data_d;
       rvfi_rs2_rdata         <= rvfi_rs2_data_d;
@@ -730,9 +856,9 @@ module ibex_core #(
   // Keep the mem data stable for each instruction cycle
   always_comb begin
     if (rvfi_insn_new_d && lsu_data_valid) begin
-      rvfi_mem_addr_d  = alu_adder_result_ex;
+      rvfi_mem_addr_d  = data_addr_o;
       rvfi_mem_rdata_d = regfile_wdata_lsu;
-      rvfi_mem_wdata_d = data_wdata_ex;
+      rvfi_mem_wdata_d = mem_cap_access ? data_wdata_o : data_wdata_ex;
     end else begin
       rvfi_mem_addr_d  = rvfi_mem_addr_q;
       rvfi_mem_rdata_d = rvfi_mem_rdata_q;
@@ -753,10 +879,10 @@ module ibex_core #(
   // Byte enable based on data type
   always_comb begin
     unique case (data_type_ex)
-      2'b00:   rvfi_mem_mask_int = 4'b1111;
-      2'b01:   rvfi_mem_mask_int = 4'b0011;
-      2'b10:   rvfi_mem_mask_int = 4'b0001;
-      default: rvfi_mem_mask_int = 4'b0000;
+      2'b00:   rvfi_mem_mask_int = 8'b0000_1111;
+      2'b01:   rvfi_mem_mask_int = 8'b0000_0011;
+      2'b10:   rvfi_mem_mask_int = 8'b0000_0001;
+      2'b11:   rvfi_mem_mask_int = 8'b1111_1111;
     endcase
   end
 
@@ -838,5 +964,16 @@ module ibex_core #(
   end
 
 `endif
+
+
+// TODO probably remove
+
+logic [31:0] pcc_getAddr_o;
+module_wrap64_getAddr module_getAddr_a (
+    .wrap64_getAddr_cap(pc_if),
+    .wrap64_getAddr(pcc_getAddr_o));
+
+
+
 
 endmodule

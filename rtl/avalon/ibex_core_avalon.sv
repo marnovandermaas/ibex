@@ -32,11 +32,11 @@ module ibex_core_avalon #(
 
     // Data memory interface (Avalon)
     output logic [31:0] avm_main_address,
-    output logic [3:0]  avm_main_byteenable,
+    output logic [7:0]  avm_main_byteenable,
     output logic        avm_main_read,
-    input  logic [31:0] avm_main_readdata,
+    input  logic [64:0] avm_main_readdata,
     output logic        avm_main_write,
-    output logic [31:0] avm_main_writedata,
+    output logic [64:0] avm_main_writedata,
     input  logic        avm_main_waitrequest,
     input  logic        avm_main_readdatavalid,
     input  logic [1:0]  avm_main_response,
@@ -71,10 +71,10 @@ module ibex_core_avalon #(
     output logic [31:0] rvfi_pc_rdata,
     output logic [31:0] rvfi_pc_wdata,
     output logic [31:0] rvfi_mem_addr,
-    output logic [ 3:0] rvfi_mem_rmask,
-    output logic [ 3:0] rvfi_mem_wmask,
-    output logic [31:0] rvfi_mem_rdata,
-    output logic [31:0] rvfi_mem_wdata,
+    output logic [ 7:0] rvfi_mem_rmask,
+    output logic [ 7:0] rvfi_mem_wmask,
+    output logic [63:0] rvfi_mem_rdata,
+    output logic [63:0] rvfi_mem_wdata,
 `endif
 
 `ifdef DII
@@ -106,10 +106,10 @@ module ibex_core_avalon #(
     logic         instr_gnt_i;
 
     logic         data_rvalid_i;
-    logic [3:0]   data_be_o;
+    logic [7:0]   data_be_o;
     logic [31:0]  data_addr_o;
-    logic [31:0]  data_wdata_o;
-    logic [31:0]  data_rdata_i;
+    logic [64:0]  data_wdata_o;
+    logic [64:0]  data_rdata_i;
     logic         data_err_i;
     logic         data_we_o;
     logic         data_req_o;

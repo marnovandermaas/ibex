@@ -91,11 +91,18 @@ module ibex_decoder #(
     output ibex_defines::cheri_imm_b_sel_e          cheri_imm_b_mux_sel_o,
     output logic cheri_a_en_o,
     output logic cheri_b_en_o,
+    // TODO find this a new home
+    input logic cap_mode_i,
+    output logic use_cap_base_o,
 
     // CSRs
     output logic                     csr_access_o,          // access to CSR
     output ibex_defines::csr_op_e    csr_op_o,              // operation to perform on CSR
     output logic                     csr_status_o,          // access to xstatus CSR
+
+    // SCRs
+    output logic scr_access_o,
+    output ibex_defines::scr_op_e scr_op_o,
 
     // LSU
     output logic                     data_req_o,            // start transaction to data memory
@@ -105,6 +112,10 @@ module ibex_decoder #(
     output logic                     data_sign_extension_o, // sign extension for data read from
                                                             // memory
     output logic [1:0]               data_reg_offset_o,     // register byte offset for stores
+    output logic mem_cap_access_o,
+
+    // not really for LSU
+    output logic mem_ddc_relative_o,
 
     // jump/branches
     output logic                     jump_in_dec_o,         // jump is being calculated in ALU
@@ -130,59 +141,13 @@ module ibex_decoder #(
   cheri_load_funct5_e cheri_load_opcode;
   cheri_s_a_d_funct5_e cheri_sad_opcode;
 
-  
+
   assign cheri_base_opcode = cheri_base_opcode_e'(instr[14:12]);
   assign cheri_threeop_opcode = cheri_threeop_funct7_e'(instr[31:25]);
   assign cheri_store_opcode = cheri_store_funct5_e'(instr[11:7]);
   assign cheri_load_opcode = cheri_load_funct5_e'(instr[24:20]);
   assign cheri_sad_opcode = cheri_s_a_d_funct5_e'(instr[24:20]);
-  
 
-  assign instr = instr_rdata_i;
-
-  //////////////////////////////////////
-  // Register and immediate selection //
-  //////////////////////////////////////
-
-  // immediate extraction and sign extension
-  assign imm_i_type_o = { {20{instr[31]}}, instr[31:20] };
-  assign imm_s_type_o = { {20{instr[31]}}, instr[31:25], instr[11:7] };
-  assign imm_b_type_o = { {19{instr[31]}}, instr[31], instr[7], instr[30:25], instr[11:8], 1'b0 };
-  assign imm_u_type_o = { instr[31:12], 12'b0 };
-  assign imm_j_type_o = { {12{instr[31]}}, instr[19:12], instr[20], instr[30:21], 1'b0 };
-
-  // immediate for CSR manipulation (zero extended)
-  assign zimm_rs1_type_o = { 27'b0, instr[`REG_S1] }; // rs1
-
-  // source registers
-  assign regfile_raddr_a_o = instr[`REG_S1]; // rs1
-  assign regfile_raddr_b_o = instr[`REG_S2]; // rs2
-
-
- 
-
-  assign instr = instr_rdata_i;
-
-  //////////////////////////////////////
-  // Register and immediate selection //
-  //////////////////////////////////////
-
-  // immediate extraction and sign extension
-  assign imm_i_type_o = { {20{instr[31]}}, instr[31:20] };
-  assign imm_s_type_o = { {20{instr[31]}}, instr[31:25], instr[11:7] };
-  assign imm_b_type_o = { {19{instr[31]}}, instr[31], instr[7], instr[30:25], instr[11:8], 1'b0 };
-  assign imm_u_type_o = { instr[31:12], 12'b0 };
-  assign imm_j_type_o = { {12{instr[31]}}, instr[19:12], instr[20], instr[30:21], 1'b0 };
-
-  // immediate for CSR manipulation (zero extended)
-  assign zimm_rs1_type_o = { 27'b0, instr[`REG_S1] }; // rs1
-
-  // source registers
-  assign regfile_raddr_a_o = instr[`REG_S1]; // rs1
-  assign regfile_raddr_b_o = instr[`REG_S2]; // rs2
-
-
-  
 
   assign instr = instr_rdata_i;
 
@@ -276,6 +241,8 @@ module ibex_decoder #(
     cheri_load_opcode_o = cheri_load_opcode;
     cheri_sad_opcode_o = cheri_sad_opcode;
 
+    mem_ddc_relative_o = '0;
+
     regfile_wdata_sel_o         = RF_WD_EX;
     regfile_we                  = 1'b0;
 
@@ -284,11 +251,15 @@ module ibex_decoder #(
     csr_illegal                 = 1'b0;
     csr_op                      = CSR_OP_READ;
 
+    scr_access_o = 1'b0;
+    scr_op_o = SCR_NONE;
+
     data_we_o                   = 1'b0;
     data_type_o                 = 2'b00;
     data_sign_extension_o       = 1'b0;
     data_reg_offset_o           = 2'b00;
     data_req_o                  = 1'b0;
+    mem_cap_access_o = 1'b0;
 
     illegal_insn                = 1'b0;
     ebrk_insn_o                 = 1'b0;
@@ -378,11 +349,13 @@ module ibex_decoder #(
       ////////////////
 
       OPCODE_STORE: begin
-        alu_op_a_mux_sel_o = OP_A_REG_A;
+        //alu_op_a_mux_sel_o = OP_A_REG_A;
+        alu_op_a_mux_sel_o  = cap_mode_i ? OP_A_IMM : OP_A_REG_A;
         alu_op_b_mux_sel_o = OP_B_REG_B;
         data_req_o         = 1'b1;
         data_we_o          = 1'b1;
         alu_operator_o     = ALU_ADD;
+        use_cap_base_o = !cap_mode_i;
 
         if (!instr[14]) begin
           // offset from immediate
@@ -398,18 +371,23 @@ module ibex_decoder #(
           2'b00: data_type_o = 2'b10; // SB
           2'b01: data_type_o = 2'b01; // SH
           2'b10: data_type_o = 2'b00; // SW
-          default: begin
-            illegal_insn = 1'b1;
+          2'b11: begin
+            // TODO if in cap encoding mode, need to change stuff
+            data_type_o = 2'b11; // SD
+            mem_cap_access_o = 1'b1;
+            use_cap_base_o = 1'b0;
           end
         endcase
       end
 
       OPCODE_LOAD: begin
-        alu_op_a_mux_sel_o  = OP_A_REG_A;
+        //alu_op_a_mux_sel_o  = OP_A_REG_A;
+        alu_op_a_mux_sel_o  = cap_mode_i ? OP_A_IMM : OP_A_REG_A;
         data_req_o          = 1'b1;
         regfile_wdata_sel_o = RF_WD_LSU;
         regfile_we          = 1'b1;
         data_type_o         = 2'b00;
+        use_cap_base_o = !cap_mode_i;
 
         // offset from immediate
         alu_operator_o      = ALU_ADD;
@@ -424,7 +402,13 @@ module ibex_decoder #(
           2'b00:   data_type_o = 2'b10; // LB
           2'b01:   data_type_o = 2'b01; // LH
           2'b10:   data_type_o = 2'b00; // LW
-          default: data_type_o = 2'b00; // illegal or reg-reg
+          2'b11: begin
+            // TODO if in cap encoding mode, need to change stuff
+            data_type_o = 2'b11; // LD
+            mem_cap_access_o = 1'b1;
+            use_cap_base_o = 1'b0;
+          end
+          //default: data_type_o = 2'b00; // illegal or reg-reg
         endcase
 
         // reg-reg load (different encoding)
@@ -448,10 +432,12 @@ module ibex_decoder #(
           endcase
         end
 
+        /* this is used for capability reads so needs to be commented out
         if (instr[14:12] == 3'b011) begin
           // LD -> RV64 only
           illegal_insn = 1'b1;
         end
+        */
       end
 
       /////////
@@ -468,11 +454,22 @@ module ibex_decoder #(
       end
 
       OPCODE_AUIPC: begin  // Add Upper Immediate to PC
-        alu_op_a_mux_sel_o  = OP_A_CURRPC;
-        alu_op_b_mux_sel_o  = OP_B_IMM;
-        imm_b_mux_sel_o     = IMM_B_U;
-        alu_operator_o      = ALU_ADD;
-        regfile_we          = 1'b1;
+        if (!cap_mode_i) begin
+          alu_op_a_mux_sel_o  = OP_A_CURRPC;
+          alu_op_b_mux_sel_o  = OP_B_IMM;
+          imm_b_mux_sel_o     = IMM_B_U;
+          alu_operator_o      = ALU_ADD;
+          regfile_we          = 1'b1;
+        end else begin
+          // send this instruction to the CHERI ALU
+          cheri_en_o = 1'b1;
+          cheri_base_opcode_o = C_INC_OFFSET_IMM;
+          cheri_op_a_mux_sel_o  = CHERI_OP_A_PCC;
+          cheri_op_b_mux_sel_o  = CHERI_OP_B_IMM;
+          cheri_imm_b_mux_sel_o = CHERI_IMM_B_U;
+          regfile_wdata_sel_o = RF_WD_CHERI;
+          regfile_we          = 1'b1;
+        end
       end
 
       OPCODE_OP_IMM: begin // Register-Immediate ALU Operations
@@ -698,12 +695,44 @@ module ibex_decoder #(
           THREE_OP: begin // The instruction is a three-operand instruction
             unique case (cheri_threeop_opcode)
               // 2 in 1 out
-              C_SPECIAL_RW, C_SET_BOUNDS, C_SET_BOUNDS_EXACT, C_AND_PERM,
+              C_SET_BOUNDS, C_SET_BOUNDS_EXACT, C_AND_PERM,
               C_SET_FLAGS, C_SET_OFFSET, C_SET_ADDR, C_INC_OFFSET,
               C_SUB, C_TEST_SUBSET: begin
                 regfile_we          = 1'b1;
                 cheri_op_b_mux_sel_o = CHERI_OP_B_REG_NUM;
                 cheri_b_en_o = 1'b1;
+              end
+
+              C_SPECIAL_RW: begin
+                // TODO the last line in this or isn't right
+                // we want to throw an illegal instruction when the SCR isn't one we've implemented, but
+                // if the destination register is 0 we don't want to throw
+                // TODO some registers were removed in order to be able to test against rvbs - these need readded
+                if ((regfile_raddr_b_o == SCR_PCC)
+                                ||(regfile_raddr_b_o == SCR_DDC)
+                                ||(regfile_raddr_b_o == SCR_UTCC)
+                                //||(regfile_raddr_b_o == SCR_UTDC)
+                                ||(regfile_raddr_b_o == SCR_USCRATCHC)
+                                ||(regfile_raddr_b_o == SCR_UEPCC)
+                                ||(regfile_raddr_b_o == SCR_STCC)
+                                //||(regfile_raddr_b_o == SCR_STDC)
+                                ||(regfile_raddr_b_o == SCR_SSCRATCHC)
+                                ||(regfile_raddr_b_o == SCR_SEPCC)
+                                ||(regfile_raddr_b_o == SCR_MTCC)
+                                //||(regfile_raddr_b_o == SCR_MTDC)
+                                ||(regfile_raddr_b_o == SCR_MSCRATCHC)
+                                ||(regfile_raddr_b_o == SCR_MEPCC)) begin
+                  scr_access_o = 1'b1;
+                  regfile_wdata_sel_o = RF_WD_CSR;
+                  regfile_we = regfile_waddr_o != '0;
+                  //scr_op_o = scr_op_e'{regfile_waddr_o != '0, regfile_raddr_a_o != '0};
+                  scr_op_o = scr_op_e'{regfile_waddr_o != '0, regfile_raddr_a_o != '0};
+                  cheri_en_o = 1'b1;
+                  cheri_op_b_mux_sel_o = CHERI_OP_B_IMM;
+                  cheri_imm_b_mux_sel_o = CHERI_IMM_B_RS2;
+                end else begin
+                  illegal_insn = 1'b1;
+                end
               end
 
               C_COPY_TYPE: begin
@@ -751,33 +780,75 @@ module ibex_decoder #(
               end
 
               // special instructions
+              // TODO stores
+              // for loads and stores, we don't need to get the ALU involved apart from calculating
+              // the effective address after adding the immediate.
               STORE: begin
                 cheri_op_b_mux_sel_o = CHERI_OP_B_REG_NUM;
                 cheri_b_en_o = 1'b1;
-                
+                mem_ddc_relative_o = ~instr[10];
+
+                // store size
+                unique case (instr[8:7])
+                  2'b00:  data_type_o = 2'b10;
+                  2'b01:  data_type_o = 2'b01;
+                  2'b10:  data_type_o = 2'b00;
+                  2'b11:  data_type_o = 2'b11;
+                endcase
+
+                if (instr[11]) begin
+                  // SC versions of the stores, not available because the A extension is not supported
+                  illegal_insn = 1'b1;
+                end
+
               end
 
               LOAD: begin
                 regfile_we          = 1'b1;
+                data_req_o = 1'b1;
+                regfile_wdata_sel_o = RF_WD_LSU;
+                regfile_we = 1'b1;
+                data_type_o = 2'b00;
+
+                data_sign_extension_o = ~instr[22];
+
+                mem_ddc_relative_o = ~instr[23];
+
+                // load size
+                unique case (instr[21:20])
+                  2'b00:  data_type_o = 2'b10;
+                  2'b01:  data_type_o = 2'b01;
+                  2'b10:  data_type_o = 2'b00;
+                  2'b11:  data_type_o = 2'b11;
+                endcase
+
+                if (instr[24]) begin
+                  // load reserved word, not available because the A extension is not supported
+                  illegal_insn = 1'b1;
+                end
               end
 
               CCALL: begin
-                cheri_op_b_mux_sel_o = CHERI_OP_B_REG_NUM;
-                cheri_b_en_o = 1'b1;
+                if (regfile_waddr_o != 5'h1F) begin
+                  cheri_op_b_mux_sel_o = CHERI_OP_B_REG_CAP;
+                  cheri_b_en_o = 1'b1;
+                end else begin
+                  // This is a CRETURN instruction
+                  // TODO implement CRETURN
+                end
               end
 
               SOURCE_AND_DEST: begin
                 // no operand b
                 regfile_we          = 1'b1;
                 unique case (cheri_sad_opcode)
-                  // the initial implementation of this will not use PCC at all, but will write only
-                  // a normal integer PC
                   C_JALR: begin
                     jump_in_dec_o = 1'b1;
                     if (instr_new_i) begin
                       // Calculate jump target
+                      // there's nothing to actually calculate but we need to perform exception checks
                       cheri_op_a_mux_sel_o  = CHERI_OP_A_REG_CAP;
-                      cheri_op_b_mux_sel_o  = CHERI_OP_B_REG_CAP;
+                      cheri_op_b_mux_sel_o  = CHERI_OP_B_PCC;
                       regfile_we          = 1'b0;
                       jump_set_o          = 1'b1;
                     end else begin

@@ -20,6 +20,23 @@
 //                                                                            //
 ////////////////////////////////////////////////////////////////////////////////
 
+`define CAP_SIZE 93
+
+/*
+    CHERI implementation details:
+      I need to implement something that checks whether the write is a valid one. The
+      memchecker module should do this. I need to instantiate this somewhere, pass the
+      actual address that I want to access and separately the capability that is providing
+      the authority for that memory access.
+
+      In the LSU, I'll calculate the actual physical address and pass it out. the memchecker
+      will live in the ibex_core module and will listen to the memory accesses. It will
+      assert an error if it sees something wrong. the error will go to the LSU and will
+      set the lsu load_err or store_err wires to high as appropriate.
+
+      When doing a legacy load in integer encoding mode, the source register is part of the
+*/
+
 /**
  * Load Store Unit
  *
@@ -36,23 +53,26 @@ module ibex_load_store_unit (
     input  logic         data_rvalid_i,
     input  logic         data_err_i,
 
+    // TODO address is redundant if we use the capability for the address
+    // however, if we're using ddc as our capability the address might not be redundant
     output logic [31:0]  data_addr_o,
     output logic         data_we_o,
-    output logic [3:0]   data_be_o,
-    output logic [31:0]  data_wdata_o,
-    input  logic [31:0]  data_rdata_i,
+    output logic [7:0]   data_be_o,
+    output logic [`CAP_SIZE-1:0]  data_wdata_o,
+    input  logic [`CAP_SIZE-1:0]  data_rdata_i,
 
     // signals to/from ID/EX stage
     input  logic         data_we_ex_i,         // write enable                     -> from ID/EX
     input  logic [1:0]   data_type_ex_i,       // data type: word, half word, byte -> from ID/EX
-    input  logic [31:0]  data_wdata_ex_i,      // data to write to memory          -> from ID/EX
+    input  logic [`CAP_SIZE-1:0]  data_wdata_ex_i,      // data to write to memory          -> from ID/EX
     input  logic [1:0]   data_reg_offset_ex_i, // register byte offset for stores  -> from ID/EX
     input  logic         data_sign_ext_ex_i,   // sign extension                   -> from ID/EX
 
-    output logic [31:0]  data_rdata_ex_o,      // requested data                   -> to ID/EX
+    output logic [`CAP_SIZE-1:0]  data_rdata_ex_o,      // requested data                   -> to ID/EX
     input  logic         data_req_ex_i,        // data request                     -> from ID/EX
 
     input  logic [31:0]  adder_result_ex_i,    // address computed in ALU          -> from ID/EX
+
 
     output logic         addr_incr_req_o,      // request address increment for
                                                // misaligned accesses              -> to ID/EX
@@ -60,6 +80,9 @@ module ibex_load_store_unit (
                                                // -> mtval
                                                // -> AGU for misaligned accesses
     output logic         data_valid_o,         // LSU has completed transaction    -> to 
+
+    input logic [`CAP_SIZE-1:0] data_cap_i,
+    input logic use_cap_base_i,
 
     // exception signals
     output logic         load_err_o,
@@ -72,7 +95,7 @@ module ibex_load_store_unit (
   logic [31:0]  data_addr_w_aligned;
   logic [31:0]  addr_last_q, addr_last_d;
 
-  logic [31:0]  rdata_q, rdata_d;
+  logic [`CAP_SIZE-1:0]  rdata_q, rdata_d;
   logic [1:0]   rdata_offset_q, rdata_offset_d;
   logic [1:0]   data_type_q, data_type_d;
   logic         data_sign_ext_q, data_sign_ext_d;
@@ -80,14 +103,14 @@ module ibex_load_store_unit (
 
   logic [1:0]   wdata_offset;   // mux control for data to be written to memory
 
-  logic [3:0]   data_be;
-  logic [31:0]  data_wdata;
+  logic [7:0]   data_be;
+  logic [64:0]  data_wdata;
 
-  logic [31:0]  data_rdata_ext;
+  logic [`CAP_SIZE-1:0]  data_rdata_ext;
 
-  logic [31:0]  rdata_w_ext; // word realignment for misaligned loads
-  logic [31:0]  rdata_h_ext; // sign extension for half words
-  logic [31:0]  rdata_b_ext; // sign extension for bytes
+  logic [64:0]  rdata_w_ext; // word realignment for misaligned loads
+  logic [64:0]  rdata_h_ext; // sign extension for half words
+  logic [64:0]  rdata_b_ext; // sign extension for bytes
 
   logic         split_misaligned_access;
   logic         handle_misaligned_q, handle_misaligned_d; // high after receiving grant for first
@@ -99,7 +122,8 @@ module ibex_load_store_unit (
 
   ls_fsm_e ls_fsm_cs, ls_fsm_ns;
 
-  assign data_addr = adder_result_ex_i;
+  // TODO do i want the offset or the address here?
+  assign data_addr = (use_cap_base_i ? data_cap_i_getBase_o : data_cap_i_getAddr_o) + adder_result_ex_i;
 
   ///////////////////
   // BE generation //
@@ -110,18 +134,18 @@ module ibex_load_store_unit (
       2'b00: begin // Writing a word
         if (!handle_misaligned_q) begin // first part of potentially misaligned transaction
           unique case (data_addr[1:0])
-            2'b00:   data_be = 4'b1111;
-            2'b01:   data_be = 4'b1110;
-            2'b10:   data_be = 4'b1100;
-            2'b11:   data_be = 4'b1000;
+            2'b00:   data_be = 8'b1111;
+            2'b01:   data_be = 8'b1110;
+            2'b10:   data_be = 8'b1100;
+            2'b11:   data_be = 8'b1000;
             default: data_be = 'X;
           endcase // case (data_addr[1:0])
         end else begin // second part of misaligned transaction
           unique case (data_addr[1:0])
-            2'b00:   data_be = 4'b0000; // this is not used, but included for completeness
-            2'b01:   data_be = 4'b0001;
-            2'b10:   data_be = 4'b0011;
-            2'b11:   data_be = 4'b0111;
+            2'b00:   data_be = 8'b0000; // this is not used, but included for completeness
+            2'b01:   data_be = 8'b0001;
+            2'b10:   data_be = 8'b0011;
+            2'b11:   data_be = 8'b0111;
             default: data_be = 'X;
           endcase // case (data_addr[1:0])
         end
@@ -130,10 +154,10 @@ module ibex_load_store_unit (
       2'b01: begin // Writing a half word
         if (!handle_misaligned_q) begin // first part of potentially misaligned transaction
           unique case (data_addr[1:0])
-            2'b00:   data_be = 4'b0011;
-            2'b01:   data_be = 4'b0110;
-            2'b10:   data_be = 4'b1100;
-            2'b11:   data_be = 4'b1000;
+            2'b00:   data_be = 8'b0011;
+            2'b01:   data_be = 8'b0110;
+            2'b10:   data_be = 8'b1100;
+            2'b11:   data_be = 8'b1000;
             default: data_be = 'X;
           endcase // case (data_addr[1:0])
         end else begin // second part of misaligned transaction
@@ -141,16 +165,23 @@ module ibex_load_store_unit (
         end
       end
 
-      2'b10,
-      2'b11: begin // Writing a byte
+      2'b10: begin // Writing a byte
         unique case (data_addr[1:0])
-          2'b00:   data_be = 4'b0001;
-          2'b01:   data_be = 4'b0010;
-          2'b10:   data_be = 4'b0100;
-          2'b11:   data_be = 4'b1000;
+          2'b00:   data_be = 8'b0001;
+          2'b01:   data_be = 8'b0010;
+          2'b10:   data_be = 8'b0100;
+          2'b11:   data_be = 8'b1000;
           default: data_be = 'X;
         endcase // case (data_addr[1:0])
       end
+
+      /*
+      2'b11: begin // Writing a double
+        unique case (data_addr[2:0])
+
+        endcase
+      end
+      */
 
       default:     data_be = 'X;
     endcase // case (data_type_ex_i)
@@ -166,10 +197,10 @@ module ibex_load_store_unit (
   assign wdata_offset = data_addr[1:0] - data_reg_offset_ex_i[1:0];
   always_comb begin
     unique case (wdata_offset)
-      2'b00:   data_wdata =  data_wdata_ex_i[31:0];
-      2'b01:   data_wdata = {data_wdata_ex_i[23:0], data_wdata_ex_i[31:24]};
-      2'b10:   data_wdata = {data_wdata_ex_i[15:0], data_wdata_ex_i[31:16]};
-      2'b11:   data_wdata = {data_wdata_ex_i[ 7:0], data_wdata_ex_i[31: 8]};
+      2'b00:   data_wdata = {1'b0, data_wdata_ex_i[31:0]};
+      2'b01:   data_wdata = {1'b0, data_wdata_ex_i[23:0], data_wdata_ex_i[31:24]};
+      2'b10:   data_wdata = {1'b0, data_wdata_ex_i[15:0], data_wdata_ex_i[31:16]};
+      2'b11:   data_wdata = {1'b0, data_wdata_ex_i[ 7:0], data_wdata_ex_i[31: 8]};
       default: data_wdata = 'X;
     endcase // case (wdata_offset)
   end
@@ -307,8 +338,8 @@ module ibex_load_store_unit (
     unique case (data_type_q)
       2'b00:       data_rdata_ext = rdata_w_ext;
       2'b01:       data_rdata_ext = rdata_h_ext;
-      2'b10,2'b11: data_rdata_ext = rdata_b_ext;
-      default:     data_rdata_ext = 'X;
+      2'b10:       data_rdata_ext = rdata_b_ext;
+      2'b11:       data_rdata_ext = data_rdata_i;
     endcase //~case(rdata_type_q)
   end
 
@@ -440,7 +471,10 @@ module ibex_load_store_unit (
 
   // output to data interface
   assign data_addr_o   = data_addr_w_aligned;
-  assign data_wdata_o  = data_wdata;
+  // THIS SCREWS UP UNALIGNED ADDRESSES
+  // original:
+  //assign data_wdata_o  = data_wdata;
+  assign data_wdata_o  = (data_type_ex_i == 2'b11) ? data_wdata_ex_i : data_wdata;
   assign data_we_o     = data_we_ex_i;
   assign data_be_o     = data_be;
 
@@ -453,6 +487,24 @@ module ibex_load_store_unit (
   assign store_err_o   = data_err_i & data_rvalid_i &  data_we_q;
 
   assign busy_o = (ls_fsm_cs == WAIT_RVALID) | (data_req_o == 1'b1);
+
+
+logic [`CAP_SIZE-1:0] data_cap_i_getOffset_o;
+module_wrap64_getOffset module_getOffset_data_cap (
+  .wrap64_getOffset_cap(data_cap_i),
+    .wrap64_getOffset(data_cap_i_getOffset_o));
+
+logic [`CAP_SIZE-1:0] data_cap_i_getAddr_o;
+module_wrap64_getAddr module_getAddr_data_cap (
+    .wrap64_getAddr_cap(data_cap_i),
+    .wrap64_getAddr(data_cap_i_getAddr_o));
+
+logic [`CAP_SIZE-1:0] data_cap_i_getBase_o;
+module_wrap64_getBase module_getBase_data_cap (
+    .wrap64_getBase_cap(data_cap_i),
+    .wrap64_getBase(data_cap_i_getBase_o));
+
+
 
   ////////////////
   // Assertions //

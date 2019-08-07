@@ -90,7 +90,7 @@ parameter EXCEPTION_SIZE = 22;
             came through the cheri block and the cheri block output a non-capability
 
 */
-  
+
 // TODO ask: there are various checks that compare otype and the base or top of capabilities
 //        Are these going to cause issues for us?
 //        they'll end up getting truncated
@@ -109,6 +109,8 @@ module ibex_cheri_alu (
 
   output logic [`INTEGER_SIZE-1:0] alu_operand_a_o,
   output logic [`INTEGER_SIZE-1:0] alu_operand_b_o,
+  output ibex_defines::alu_op_e alu_operator_o,
+
   input logic [31:0] alu_result_i,
 
   output logic [`CAP_SIZE-1:0] returnvalue_o,
@@ -133,7 +135,13 @@ module ibex_cheri_alu (
         case (threeop_opcode_i)
           // TODO implement later
           C_SPECIAL_RW: begin
-
+            // operand b is the register id
+            // operand a is the data that is (maybe) going to be written to the register
+            // this operation is implemented in other places since there's nothing the ALU can do
+            // for it
+            returnvalue_o = operand_a_i;
+            //$display("cspecialrw output: %h", returnvalue_o);
+            wroteCapability = 1'b1;
           end
 
           C_SET_BOUNDS: begin
@@ -143,25 +151,28 @@ module ibex_cheri_alu (
 
             alu_operand_a_o = a_getAddr_o;
             alu_operand_b_o = operand_b_i;
+            alu_operator_o = ALU_ADD;
 
             exceptions_a_o =   exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
                             |  exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
                             |  exceptions_a[LENGTH_VIOLATION] << LENGTH_VIOLATION
-                            |  ((alu_result_i > a_getTop_o) << LENGTH_VIOLATION);
+                            |  ((a_getAddr_o + operand_b_i > a_getTop_o) << LENGTH_VIOLATION);
+            //$display("csetbounds output: %h   exceptions: %h", returnvalue_o, exceptions_a_o);
           end
 
           C_SET_BOUNDS_EXACT: begin
             a_setBounds_i = operand_b_i;
             returnvalue_o = a_setBounds_o[`CAP_SIZE-1:0];
             wroteCapability = 1'b1;
-            
-            
+
+
             exceptions_a_o =    (  exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
                                  | exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
                                  | exceptions_a[LENGTH_VIOLATION] << LENGTH_VIOLATION
                                 )
                               | ((a_getAddr_o + operand_b_i > a_getTop_o) << LENGTH_VIOLATION)
                               | ((!a_setBounds_o[`CAP_SIZE] << INEXACT_BOUNDS_VIOLATION));
+            //$display("csetboundse output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           C_SEAL: begin
@@ -172,7 +183,7 @@ module ibex_cheri_alu (
             exceptions_a_o =    exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
                               | exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
                               | ((!a_setType_o[`CAP_SIZE] << INEXACT_BOUNDS_VIOLATION));
-            
+
             exceptions_b_o =  ( exceptions_b[TAG_VIOLATION] << TAG_VIOLATION
                               | exceptions_b[SEAL_VIOLATION] << SEAL_VIOLATION
                               | exceptions_b[LENGTH_VIOLATION] << LENGTH_VIOLATION)
@@ -180,6 +191,7 @@ module ibex_cheri_alu (
                               // capabilities with type -1 are unsealed
                               | ((b_getAddr_o > {`OTYPE_SIZE{1'b1}}) << LENGTH_VIOLATION)
                               | exceptions_b[PERMIT_SEAL_VIOLATION] << PERMIT_SEAL_VIOLATION;
+            //$display("cseal output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           C_UNSEAL: begin
@@ -196,6 +208,7 @@ module ibex_cheri_alu (
                             | ((b_getAddr_o != a_getType_o) << TYPE_VIOLATION)
                             | exceptions_b[PERMIT_UNSEAL_VIOLATION] << PERMIT_UNSEAL_VIOLATION
                             | ((b_getAddr_o >= b_getTop_o) << LENGTH_VIOLATION);
+            //$display("cunseal output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           C_AND_PERM: begin
@@ -205,6 +218,7 @@ module ibex_cheri_alu (
 
             exceptions_a_o = (exceptions_a & (   1'b1 << TAG_VIOLATION
                                                | 1'b1 << SEAL_VIOLATION));
+            //$display("candperm output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           C_SET_FLAGS: begin
@@ -213,6 +227,7 @@ module ibex_cheri_alu (
             wroteCapability = 1'b1;
 
             exceptions_a_o = exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION;
+            //$display("csetflags output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           C_SET_OFFSET: begin
@@ -220,17 +235,19 @@ module ibex_cheri_alu (
             returnvalue_o = a_setOffset_o[`CAP_SIZE] ? a_setOffset_o[`CAP_SIZE-1:0] :
                                                       a_getBase_o + operand_b_i;
             wroteCapability = a_setOffset_o[`CAP_SIZE];
-            
+
             exceptions_a_o = exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION;
+            //$display("csetoffset output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
-          
+
           C_SET_ADDR: begin
             a_setAddr_i = operand_b_i;
             returnvalue_o = a_setAddr_o[`CAP_SIZE] ? a_setAddr_o[`CAP_SIZE-1:0] : operand_b_i;
 
             wroteCapability = a_setAddr_o[`CAP_SIZE];
-            
+
             exceptions_a_o = exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION;
+            //$display("csetaddr output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           C_INC_OFFSET: begin
@@ -240,16 +257,18 @@ module ibex_cheri_alu (
             wroteCapability = a_setOffset_o[`CAP_SIZE];
 
             exceptions_a_o = exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION;
+            //$display("cincoffset output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           C_TO_PTR: begin
-            returnvalue_o = a_isValidCap_o ? a_getAddr_o - b_getBase_o :
-                                             `INTEGER_SIZE'b0;
+            returnvalue_o = a_isValidCap_o ? a_getAddr_o - b_getBase_o : `INTEGER_SIZE'b0;
+
             wroteCapability = 1'b0;
 
             exceptions_a_o = exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION;
 
             exceptions_b_o = exceptions_b[TAG_VIOLATION] << TAG_VIOLATION;
+            //$display("ctoptr output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           C_FROM_PTR: begin
@@ -268,11 +287,13 @@ module ibex_cheri_alu (
 
             exceptions_a_o =  (operand_b_i != '0 && exceptions_a[TAG_VIOLATION]) << TAG_VIOLATION
                             | (operand_b_i != '0 && exceptions_a[SEAL_VIOLATION]) << SEAL_VIOLATION;
+            //$display("cfromptr output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           C_SUB: begin
             returnvalue_o = a_getAddr_o - b_getAddr_o;
             wroteCapability = 0'b0;
+            //$display("csub output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           C_BUILD_CAP: begin
@@ -287,6 +308,7 @@ module ibex_cheri_alu (
                             |(((a_getPerms_o & b_getPerms_o) != b_getPerms_o) << SOFTWARE_DEFINED_VIOLATION);
 
             exceptions_b_o = (b_getBase_o > b_getTop_o) << LENGTH_VIOLATION;
+            //$display("cbuildcap output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           C_COPY_TYPE: begin
@@ -327,15 +349,15 @@ module ibex_cheri_alu (
                             |exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
                             |((b_isSealed_o && b_getType_o < a_getBase_o) << LENGTH_VIOLATION)
                             |((b_isSealed_o && b_getType_o >= a_getTop_o) << LENGTH_VIOLATION);
+            //$display("ccopytype output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
-          // TODO implement later
           C_C_SEAL: begin
             a_setType_i = b_getAddr_o;
             returnvalue_o = (!b_isValidCap_o || b_getAddr_o == {`INTEGER_SIZE{1'b1}}) ? operand_a_i : a_setType_o;
             wroteCapability = 1'b1;
-             
-            
+
+
             // TODO deal with exceptions
             exceptions_a_o = exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
                             |((exceptions_a[SEAL_VIOLATION] && !(!b_isValidCap_o || b_getAddr_o == {`INTEGER_SIZE{1'b1}}))
@@ -346,6 +368,7 @@ module ibex_cheri_alu (
                             |((exceptions_b[LENGTH_VIOLATION] && !(!b_isValidCap_o || b_getAddr_o == {`INTEGER_SIZE{1'b1}})) << LENGTH_VIOLATION)
                             |((b_getAddr_o >= b_getTop_o && !(!b_isValidCap_o || b_getAddr_o == {`INTEGER_SIZE{1'b1}})) << LENGTH_VIOLATION)
                             |((b_getAddr_o > {`OTYPE_SIZE{1'b1}} && !(!b_isValidCap_o || b_getAddr_o == {`INTEGER_SIZE{1'b1}})) << LENGTH_VIOLATION);
+            //$display("ccseal output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           C_TEST_SUBSET: begin
@@ -355,6 +378,7 @@ module ibex_cheri_alu (
                             (b_getPerms_o & a_getPerms_o) == b_getPerms_o ? 1'b0 :
                                                                           1'b1;
             wroteCapability = 1'b0;
+            //$display("ctestsubset output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           // TODO implement later
@@ -363,6 +387,10 @@ module ibex_cheri_alu (
           end
 
           // TODO implement later
+          // TODO can implement all loads using this, including capability loads
+          //      however, capability loads need to be capability-aligned.
+          //      there should be no other unaligned loads since we deal with them by just doing two
+          //      aligned loads
           LOAD: begin
             // TODO
           end
@@ -382,6 +410,7 @@ module ibex_cheri_alu (
             exceptions_b_o = exceptions_b[TAG_VIOLATION] << TAG_VIOLATION
                             |exceptions_b[SEAL_VIOLATION] << SEAL_VIOLATION
                             |((b_getPerms_o[`PERMIT_EXECUTE_INDEX]) << PERMIT_EXECUTE_VIOLATION);
+            //$display("ccall output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           SOURCE_AND_DEST: begin
@@ -389,60 +418,71 @@ module ibex_cheri_alu (
               C_GET_PERM: begin
                 returnvalue_o = {{`INTEGER_SIZE-`PERMS_SIZE{1'b0}}, a_getPerms_o};
                 wroteCapability = 1'b0;
+            //$display("cgetperm output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
               end
 
               C_GET_TYPE: begin
                 returnvalue_o = a_isSealed_o ? {{`INTEGER_SIZE-`OTYPE_SIZE{1'b0}}, a_getType_o} : {`INTEGER_SIZE{1'b1}};
                 wroteCapability = 1'b0;
+            //$display("cgettype output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
               end
 
               C_GET_BASE: begin
                 returnvalue_o = a_getBase_o;
                 wroteCapability = 1'b0;
+            //$display("cgetbase output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
               end
 
               C_GET_LEN: begin
                 returnvalue_o = a_getLength_o[`LENGTH_SIZE-1] ? {`INTEGER_SIZE{1'b1}} : a_getLength_o[`INTEGER_SIZE-1:0];
                 wroteCapability = 1'b0;
+            //$display("cgetlen output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
               end
 
               C_GET_TAG: begin
                 returnvalue_o = {{`INTEGER_SIZE-1{1'b0}}, a_isValidCap_o};
                 wroteCapability = 1'b0;
+            //$display("cgettag output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
               end
 
               C_GET_SEALED: begin
                 returnvalue_o = {{`INTEGER_SIZE-`OTYPE_SIZE{1'b0}}, a_isSealed_o};
                 wroteCapability = 1'b0;
+            //$display("cgetsealed output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
               end
 
               C_GET_OFFSET: begin
                 returnvalue_o = {{`INTEGER_SIZE-`OFFSET_SIZE{1'b0}}, a_getOffset_o};
                 wroteCapability = 1'b0;
+            //$display("cgetoffset output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
               end
 
               C_GET_FLAGS: begin
                 returnvalue_o = {{`INTEGER_SIZE-`FLAG_SIZE{1'b0}}, a_getFlags_o};
                 wroteCapability = 1'b0;
+            //$display("cgetflags output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
               end
 
               C_MOVE: begin
                 returnvalue_o = operand_a_i;
                 wroteCapability = 1'b1;
+            //$display("cmove output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
               end
 
               C_CLEAR_TAG: begin
                 a_setValidCap_i = 1'b0;
                 returnvalue_o = a_setValidCap_o;
                 wroteCapability = 1'b1;
+            //$display("ccleartag output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
               end
 
               // TODO implement later
               // TODO implement the rest of this instruction in the ID stage
               C_JALR: begin
+                // TODO this next comment is now obsolete
                 // in this instruction, cb is operand_b since we're actually passing pcc as the first operand
 
-                // current implemenation of JAL and JALR:
+                // current implementation of JAL and JALR:
                 // ibex takes 2 cycles to do a normal JAL and JALR, so this one can also take 2 cycles
                 // in the first cycle, ibex calculates the jump target and sends it to the IF stage
                 // in the second cycle, ibex calculates the old PC + 4 and stores that in the destination
@@ -455,8 +495,10 @@ module ibex_cheri_alu (
                 // issue is this isn't a very clean way of doing this - we need to fake incoffsetimm instruction
                 // in the decoder. However, ibex already does it this way.
 
-                a_setAddr_i = b_getAddr_o;
-                returnvalue_o = a_setAddr_o[`CAP_SIZE-1:0];
+                b_setAddr_i = {a_getAddr_o[`INTEGER_SIZE-1:1], 1'b0};
+                //returnvalue_o = b_setAddr_o[`CAP_SIZE-1:0];
+                returnvalue_o = operand_a_i;
+                wroteCapability = 1'b1;
 
                 exceptions_a_o = exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
                                 |exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
@@ -465,9 +507,10 @@ module ibex_cheri_alu (
                                 |((a_getAddr_o + `MIN_INSTR_BYTES > a_getTop_o) << LENGTH_VIOLATION);
                                 // we don't care about trying to throw the last exception since we do support
                                 // compressed instructions
-                
+
                 // we don't set wroteCapability since we're not planning on writing what we returned to
                 // a register
+            //$display("cjalr output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
               end
 
               // TODO implement elsewhere
@@ -477,6 +520,7 @@ module ibex_cheri_alu (
               C_GET_ADDR: begin
                 returnvalue_o = a_getAddr_o;
                 wroteCapability = 1'b0;
+            ////$display("cgetaddr output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
               end
 
               // TODO ask:this instruction doesn't make sense on ibex - what exception to call?
@@ -485,25 +529,26 @@ module ibex_cheri_alu (
               end
 
               default: begin
-                $display("something went wrong in the ibex_alu");
+                ////$display("something went wrong in the ibex_alu");
               end
             endcase
           end
 
 
               default: begin
-                $display("something went wrong in the ibex_alu");
+                //$display("something went wrong in the ibex_alu");
               end
         endcase
       end
 
       C_INC_OFFSET_IMM: begin
         // TODO immediate from ibex should already be sign-extended, so might be able to just skip sign-extension stuff here
-        a_setOffset_i = a_getOffset_o + (operand_b_i[`IMM_SIZE-1] ? {{`INTEGER_SIZE-`IMM_SIZE{1'b1}}, operand_b_i} : operand_b_i);
+        a_setOffset_i = a_getOffset_o + operand_b_i;
         returnvalue_o = a_setOffset_o[`CAP_SIZE] ? a_setOffset_o : a_getAddr_o + (operand_b_i[`IMM_SIZE-1] ? {{`INTEGER_SIZE-`IMM_SIZE{1'b1}}, operand_b_i} : operand_b_i);
         wroteCapability = a_setOffset_o[`CAP_SIZE];
 
         exceptions_a_o = exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION;
+            //$display("cincoffsetimm output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
       end
 
       C_SET_BOUNDS_IMM: begin
@@ -517,10 +562,11 @@ module ibex_cheri_alu (
                         |exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
                         |exceptions_a[LENGTH_VIOLATION] << LENGTH_VIOLATION
                         |((a_getAddr_o+operand_b_i[11:0] > a_getTop_o) << LENGTH_VIOLATION);
+            //$display("csetboundsimm output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
       end
 
       default: begin
-        $display("something went wrong in the ibex_alu");
+        //$display("something went wrong in the ibex_alu");
       end
 
     endcase
@@ -547,7 +593,7 @@ module ibex_cheri_alu (
 
 
 
-*/  
+*/
 
 
 
@@ -1139,6 +1185,13 @@ module_wrap64_setAddr module_wrap64_setAddr_a (
 			    .wrap64_setAddr_addr(a_setAddr_i),
 			    .wrap64_setAddr(a_setAddr_o));
 
+logic [`CAP_SIZE-1:0] b_setAddr_i;
+logic [`CAP_SIZE:0] b_setAddr_o;
+module_wrap64_setAddr module_wrap64_setAddr_b (
+                .wrap64_setAddr_cap(operand_b_i),
+			    .wrap64_setAddr_addr(b_setAddr_i),
+			    .wrap64_setAddr(b_setAddr_o));
+
 
 
 
@@ -1159,21 +1212,21 @@ module_wrap64_setAddr module_wrap64_setAddr_a (
   // this may not actually be needed because exceptions have priorities
   // also need to have two vectors which hold exceptions: one for operand a and one for operand b
   always_comb begin
-    exceptions_a = `EXCEPTION_SIZE'b0;   
-    exceptions_b = `EXCEPTION_SIZE'b0;   
+    exceptions_a = `EXCEPTION_SIZE'b0;
+    exceptions_b = `EXCEPTION_SIZE'b0;
 
     if (!a_isValidCap_o)
       exceptions_a[TAG_VIOLATION] = 1'b1;
 
     if (!b_isValidCap_o)
       exceptions_b[TAG_VIOLATION] = 1'b1;
-    
+
     if (a_isValidCap_o && a_isSealed_o)
       exceptions_a[SEAL_VIOLATION] = 1'b1;
 
     if (b_isValidCap_o && b_isSealed_o)
       exceptions_b[SEAL_VIOLATION] = 1'b1;
-    
+
     // checks that the address is not smaller than the base
     if (a_getAddr_o < a_getBase_o)
       exceptions_a[LENGTH_VIOLATION] = 1'b1;
