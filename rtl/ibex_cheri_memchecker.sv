@@ -90,7 +90,7 @@ module ibex_cheri_memchecker #(
   always_comb begin
     // TODO either set it to '0 here or use a setIsValidCap. using setIsValidCap means that if the capability
     // layout changes i only need to update dependencies
-    lsu_data_o = access_capability_i ? (!(|address_i[3:0]) ? fromMem_o
+    lsu_data_o = access_capability_i ? (!(|address_i[2:0]) ? fromMem_o
                                                          : {1'b0, fromMem_o[`CAP_SIZE-2:0]})
                                    : mem_data_i;
   end
@@ -98,7 +98,7 @@ module ibex_cheri_memchecker #(
   always_comb begin
     // TODO either set it to '0 here or use a setIsValidCap. using setIsValidCap means that if the capability
     // layout changes i only need to update dependencies
-    toMem_i = {access_capability_i && !(|address_i[3:0]) ? lsu_data_i[`CAP_SIZE-1] : '0, lsu_data_i[`CAP_SIZE-2:0]};
+    toMem_i = {access_capability_i && !(|address_i[2:0]) ? lsu_data_i[`CAP_SIZE-1] : '0, lsu_data_i[`CAP_SIZE-2:0]};
     mem_data_o = access_capability_i ? toMem_o : lsu_data_i;
   end
 

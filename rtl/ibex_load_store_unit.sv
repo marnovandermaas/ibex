@@ -83,6 +83,7 @@ module ibex_load_store_unit (
 
     input logic [`CAP_SIZE-1:0] data_cap_i,
     input logic use_cap_base_i,
+    input logic [`EXCEPTION_SIZE-1:0] cheri_mem_exc_i,
 
     // exception signals
     output logic         load_err_o,
@@ -365,10 +366,14 @@ module ibex_load_store_unit (
 
       IDLE: begin
         if (data_req_ex_i) begin
-          data_req_o = 1'b1;
+          // TODO move exception checking elsewhere
+          data_req_o = 1'b1 && !(|cheri_mem_exc_i);
           if (data_gnt_i) begin
             handle_misaligned_d = split_misaligned_access;
             ls_fsm_ns           = split_misaligned_access ? WAIT_RVALID_MIS : WAIT_RVALID;
+          end else if (|cheri_mem_exc_i) begin
+            data_valid_o = 1'b1;
+            ls_fsm_ns = IDLE;
           end else begin
             ls_fsm_ns           = split_misaligned_access ? WAIT_GNT_MIS    : WAIT_GNT;
           end
@@ -376,7 +381,8 @@ module ibex_load_store_unit (
       end
 
       WAIT_GNT_MIS: begin
-        data_req_o = 1'b1;
+        // TODO move exception checking elsewhere
+        data_req_o = 1'b1 && !(|cheri_mem_exc_i);
         if (data_gnt_i) begin
           handle_misaligned_d = 1'b1;
           ls_fsm_ns           = WAIT_RVALID_MIS;
@@ -395,7 +401,8 @@ module ibex_load_store_unit (
             ls_fsm_ns           = IDLE;
           end else begin
             // push out second request
-            data_req_o = 1'b1;
+            // TODO move exception checking elsewhere
+            data_req_o = 1'b1 && !(|cheri_mem_exc_i);
             if (data_gnt_i) begin
               // second grant is received
               ls_fsm_ns = WAIT_RVALID;
@@ -413,7 +420,8 @@ module ibex_load_store_unit (
       WAIT_GNT: begin
         // tell ID/EX stage to update the address
         addr_incr_req_o = handle_misaligned_q;
-        data_req_o      = 1'b1;
+        // TODO move exception checking elsewhere
+        data_req_o      = 1'b1 && !(|cheri_mem_exc_i);
         if (data_gnt_i) begin
           ls_fsm_ns = WAIT_RVALID;
         end
@@ -483,8 +491,8 @@ module ibex_load_store_unit (
 
   // to know what kind of error to signal, we need to know the type of the transaction to which
   // the outsanding rvalid belongs.
-  assign load_err_o    = data_err_i & data_rvalid_i & ~data_we_q;
-  assign store_err_o   = data_err_i & data_rvalid_i &  data_we_q;
+  assign load_err_o    = ((data_err_i & data_rvalid_i) || (|cheri_mem_exc_i & data_req_ex_i)) & ~data_we_q;
+  assign store_err_o   = ((data_err_i & data_rvalid_i) || (|cheri_mem_exc_i & data_req_ex_i)) &  data_we_q;
 
   assign busy_o = (ls_fsm_cs == WAIT_RVALID) | (data_req_o == 1'b1);
 

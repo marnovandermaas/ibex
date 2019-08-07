@@ -636,6 +636,8 @@ module ibex_core #(
 
       .data_cap_i (mem_cap),
       .use_cap_base_i (use_cap_base),
+      .cheri_mem_exc_i(cheri_data_exc),
+      //.cheri_mem_exc_i(0),
 
       .addr_incr_req_o       ( lsu_addr_incr_req   ),
       .addr_last_o           ( lsu_addr_last       ),
