@@ -145,23 +145,29 @@ int main(int argc, char** argv, char** env) {
         // send back execution trace if the number of instructions that have come out is equal to the
         // number that have gone in
         //std::cout << "send" << std::endl;
+        // TODO clean up bulk sending
         if (returntrace.size() > 0 && out_count == in_count) {
-            std::cout << "start sending" << std::endl;
-            for (int i = 0; i < returntrace.size(); i++) {
-                usleep(300);
-                std::cout << i << std::endl;
+            int tosend = 1;
+            for (int i = 0; i < returntrace.size(); i+=tosend) {
+                tosend = 1;
+                RVFI_DII_Execution_Packet sendarr[50];
+                sendarr[0] = returntrace[i];
+
+                // bulk send if possible
+                if (returntrace.size() - i > 50) {
+                    tosend = 50;
+                    for (int j = 0; j < tosend; j++) {
+                        sendarr[j] = returntrace[i+j];
+                    }
+                }
                 // loop to make sure that the packet has been properly sent
                 while (
-                    !serv_socket_putN(socket, sizeof(RVFI_DII_Execution_Packet), (unsigned int *) &(returntrace[i]))
+                    !serv_socket_putN(socket, sizeof(RVFI_DII_Execution_Packet) * tosend, (unsigned int *) sendarr)
                 ) {
-                    std::cout << "send loop" << std::endl;
                     // empty
                 }
-                std::cout << std::dec << i << " finished"  << std::endl;
             }
-
             returntrace.clear();
-            std::cout << "finish sending" << std::endl;
         }
 
         // set up a packet and try to receive packets if the number of instructions that we've put in is
@@ -193,8 +199,8 @@ int main(int argc, char** argv, char** env) {
                 break;
             }
 
-            // sleep for 10ms before trying to receive another instruction
-            usleep(1000);
+            // sleep for 0.1ms before trying to receive another instruction
+            usleep(100);
         }
 
 
@@ -203,13 +209,13 @@ int main(int argc, char** argv, char** env) {
         if ((in_count <= received) && received > 0 && ((in_count - out_count > 0) || in_count == 0 || (out_count == in_count && received > in_count))) {
 
             //std::cout << "in_count: " << in_count << " out_count: " << out_count << " diff: " << in_count - out_count << std::endl;
-            
+            /*
             if (in_count - out_count > 0) {
                 for (int i = out_count + 1; i <= in_count; i++) {
                     std::cout << "next " << i << ": " << std::hex << instructions[i].dii_insn << std::endl;
                 }
             }
-            
+            */
 
 
             // read rvfi data and add packet to list of packets to send
@@ -402,7 +408,6 @@ int main(int argc, char** argv, char** env) {
                     data[1] |= ((top->avm_main_byteenable>>4) & 0x1) ? memory[address] : 0;
 
                     address--;
-                    data[1]<<=8;
 
                     data[0] |= ((top->avm_main_byteenable>>3) & 0x1) ? memory[address] : 0;
 
@@ -459,6 +464,7 @@ int main(int argc, char** argv, char** env) {
                     data[1] = top->avm_main_writedata[1];
                     data[2] = top->avm_main_writedata[2];
 
+
                     // convert the address to a byte address
                     address<<=2;
 
@@ -497,6 +503,19 @@ int main(int argc, char** argv, char** env) {
                     data[1]>>=8;
 
                     memory[address] = ((top->avm_main_byteenable>>7) & 0x1) ? data[1] : memory[address];
+
+                    //std::cout << std::hex << "wrote memory at 0x" << (address-7)
+                    //                                              << ": 0x"
+                    //                                              << std::to_string(memory[address]) << "_"
+                    //                                              << std::to_string(memory[address-1]) << "_"
+                    //                                              << std::to_string(memory[address-2]) << "_"
+                    //                                              << std::to_string(memory[address-3]) << "_"
+                    //                                              << std::to_string(memory[address-4]) << "_"
+                    //                                              << std::to_string(memory[address-5]) << "_"
+                    //                                              << std::to_string(memory[address-6]) << "_"
+                    //                                              << std::to_string(memory[address-7])
+                    //                                              << " tag: " << tags[address/8]
+                    //                                              << std::endl;
 
 
                     // set output signals appropriately
