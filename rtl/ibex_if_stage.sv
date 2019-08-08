@@ -145,8 +145,9 @@ module ibex_if_stage #(
       //EXC_PC_EXC:     exc_pc = { boot_addr_i[31:8], 8'h00                    };
       // TODO change to MEPCC
       //EXC_PC_EXC:     exc_pc = { boot_addr_i[31:8], 8'h00                    };
-      EXC_PC_EXC:     exc_pc = scr_mtcc_i;
+      EXC_PC_EXC:     exc_pc = scr_mtcc_base;
       //EXC_PC_IRQ:     exc_pc = { boot_addr_i[31:8], 1'b0, irq_id[4:0], 2'b00 };
+      // TODO implement vectored exceptions
       EXC_PC_IRQ:     exc_pc = `ALMIGHTY_CAP;
       //EXC_PC_DBD:     exc_pc = DmHaltAddr;
       //EXC_PC_DBG_EXC: exc_pc = DmExceptionAddr;
@@ -170,7 +171,7 @@ module ibex_if_stage #(
     endcase
 
     // TODO this will need changed
-    pc_next = pc_mux_i == PC_BOOT ? mtcc_getAddr_o : fetch_addr_n_getAddr_o;
+    pc_next = pc_mux_i == PC_BOOT ? {mtcc_getAddr_o[31:2], 2'b00} : fetch_addr_n_getAddr_o;
   end
 
   // prefetch buffer, caches a fixed number of instructions
@@ -296,6 +297,18 @@ module ibex_if_stage #(
     end
   end
 
+
+
+logic [`CAP_SIZE-1:0] scr_mtcc_base;
+logic [`CAP_SIZE-1:0] scr_mtcc_i_getOffset_o;
+module_wrap64_getOffset module_getOffset_scr (
+  .wrap64_getOffset_cap(scr_mtcc_i),
+    .wrap64_getOffset(scr_mtcc_i_getOffset_o));
+
+module_wrap64_setOffset module_setOffset_scr (
+  .wrap64_setOffset_cap(scr_mtcc_i),
+    .wrap64_setOffset_offset({scr_mtcc_i_getOffset_o[31:2], 2'b00}),
+    .wrap64_setOffset(scr_mtcc_base));
 
 // TODO remove
 logic [`CAP_SIZE-1:0] mtcc_getAddr_o;
