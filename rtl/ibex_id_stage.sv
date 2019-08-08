@@ -327,12 +327,15 @@ module ibex_id_stage #(
 
   // TODO this is wrong, because it means that when doing a cheri load it will try to use DDC when it shouldn't
   // TODO look through this:
+  /*
   assign mem_cap_o = !cheri_en_o && pcc_getFlags_o && mem_cap_access_o ? regfile_rdata_a_cap :
                      !cheri_en_o && pcc_getFlags_o && !mem_cap_access_o ? regfile_rdata_a_cap :
                      !cheri_en_o && !pcc_getFlags_o && mem_cap_access_o ? scr_ddc_i :
                      !cheri_en_o && !pcc_getFlags_o && !mem_cap_access_o ? scr_ddc_i :
                      mem_ddc_relative ? scr_ddc_i :
                      regfile_rdata_a_cap;
+                     */
+  assign mem_cap_o = mem_ddc_relative ? scr_ddc_i : regfile_rdata_a_cap;
 
 
 
@@ -388,6 +391,7 @@ module ibex_id_stage #(
       IMM_B_J:         imm_b = imm_j_type;
       IMM_B_INCR_PC:   imm_b = instr_is_compressed_i ? 32'h2 : 32'h4;
       IMM_B_INCR_ADDR: imm_b = 32'h4;
+      IMM_B_ZERO:      imm_b = 32'0;
       default:         imm_b = 'X;
     endcase
   end

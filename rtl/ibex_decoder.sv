@@ -355,7 +355,8 @@ module ibex_decoder #(
         data_req_o         = 1'b1;
         data_we_o          = 1'b1;
         alu_operator_o     = ALU_ADD;
-        use_cap_base_o = !cap_mode_i;
+        mem_ddc_relative_o = !cap_mode_i;
+        use_cap_base_o = 1'b0;
 
         if (!instr[14]) begin
           // offset from immediate
@@ -387,7 +388,8 @@ module ibex_decoder #(
         regfile_wdata_sel_o = RF_WD_LSU;
         regfile_we          = 1'b1;
         data_type_o         = 2'b00;
-        use_cap_base_o = !cap_mode_i;
+        mem_ddc_relative_o = !cap_mode_i;
+        use_cap_base_o = 1'b0;
 
         // offset from immediate
         alu_operator_o      = ALU_ADD;
@@ -704,22 +706,23 @@ module ibex_decoder #(
               end
 
               C_SPECIAL_RW: begin
-                // TODO the last line in this or isn't right
-                // we want to throw an illegal instruction when the SCR isn't one we've implemented, but
-                // if the destination register is 0 we don't want to throw
-                // TODO some registers were removed in order to be able to test against rvbs - these need readded
+                // Currently the RISC-CHERI spec does not state that you shouldn't implement the
+                // user and supervisor SCRs if you don't have user and supervisor mode respectively
+                // Ibex does not have user or supervisor mode so for now I claim that the
+                // instructions are illegal
+                // They're left here but commented out if needed in the future
                 if ((regfile_raddr_b_o == SCR_PCC)
                                 ||(regfile_raddr_b_o == SCR_DDC)
-                                ||(regfile_raddr_b_o == SCR_UTCC)
+                                //||(regfile_raddr_b_o == SCR_UTCC)
                                 //||(regfile_raddr_b_o == SCR_UTDC)
-                                ||(regfile_raddr_b_o == SCR_USCRATCHC)
-                                ||(regfile_raddr_b_o == SCR_UEPCC)
-                                ||(regfile_raddr_b_o == SCR_STCC)
+                                //||(regfile_raddr_b_o == SCR_USCRATCHC)
+                                //||(regfile_raddr_b_o == SCR_UEPCC)
+                                //||(regfile_raddr_b_o == SCR_STCC)
                                 //||(regfile_raddr_b_o == SCR_STDC)
-                                ||(regfile_raddr_b_o == SCR_SSCRATCHC)
-                                ||(regfile_raddr_b_o == SCR_SEPCC)
+                                //||(regfile_raddr_b_o == SCR_SSCRATCHC)
+                                //||(regfile_raddr_b_o == SCR_SEPCC)
                                 ||(regfile_raddr_b_o == SCR_MTCC)
-                                //||(regfile_raddr_b_o == SCR_MTDC)
+                                ||(regfile_raddr_b_o == SCR_MTDC)
                                 ||(regfile_raddr_b_o == SCR_MSCRATCHC)
                                 ||(regfile_raddr_b_o == SCR_MEPCC)) begin
                   scr_access_o = 1'b1;
@@ -784,42 +787,65 @@ module ibex_decoder #(
               // for loads and stores, we don't need to get the ALU involved apart from calculating
               // the effective address after adding the immediate.
               STORE: begin
-                cheri_op_b_mux_sel_o = CHERI_OP_B_REG_NUM;
-                cheri_b_en_o = 1'b1;
+                //cheri_op_b_mux_sel_o = CHERI_OP_B_REG_NUM;
+                data_req_o = 1'b1;
+                data_we_o = 1'b1;
+                cheri_en_o = 1'b0;
+
                 mem_ddc_relative_o = ~instr[10];
+                use_cap_base_o = instr[10];
+
+                alu_op_a_mux_sel_o = OP_A_REG_A;
+                alu_op_b_mux_sel_o = OP_B_IMM;
+                imm_b_mux_sel_o = IMM_B_ZERO;
+                alu_operator_o      = ALU_ADD;
 
                 // store size
                 unique case (instr[8:7])
                   2'b00:  data_type_o = 2'b10;
                   2'b01:  data_type_o = 2'b01;
                   2'b10:  data_type_o = 2'b00;
-                  2'b11:  data_type_o = 2'b11;
+                  2'b11: begin
+                    data_type_o = 2'b11;
+                    mem_cap_access_o = 1'b1;
+                  end
                 endcase
 
-                if (instr[11]) begin
-                  // SC versions of the stores, not available because the A extension is not supported
+                if (instr[11] || instr[9]) begin
+                  // instr[11] indicates SC versions of the stores, not available because
+                  // the A extension is not supported
+                  // instr[9] indicates quad-size stores, not available because this can read only
+                  // up to doubles
                   illegal_insn = 1'b1;
                 end
 
               end
 
               LOAD: begin
-                regfile_we          = 1'b1;
+                regfile_we = 1'b1;
                 data_req_o = 1'b1;
                 regfile_wdata_sel_o = RF_WD_LSU;
-                regfile_we = 1'b1;
-                data_type_o = 2'b00;
-
-                data_sign_extension_o = ~instr[22];
+                cheri_en_o = 1'b0;
 
                 mem_ddc_relative_o = ~instr[23];
+                use_cap_base_o = instr[10];
+
+                alu_op_a_mux_sel_o = OP_A_REG_A;
+                alu_op_b_mux_sel_o = OP_B_IMM;
+                imm_b_mux_sel_o = IMM_B_ZERO;
+                alu_operator_o      = ALU_ADD;
+
+                data_sign_extension_o = ~instr[22];
 
                 // load size
                 unique case (instr[21:20])
                   2'b00:  data_type_o = 2'b10;
                   2'b01:  data_type_o = 2'b01;
                   2'b10:  data_type_o = 2'b00;
-                  2'b11:  data_type_o = 2'b11;
+                  2'b11: begin
+                    data_type_o = 2'b11;
+                    mem_cap_access_o = 1'b1;
+                  end
                 endcase
 
                 if (instr[24]) begin

@@ -84,6 +84,8 @@ module ibex_load_store_unit (
     input logic [`CAP_SIZE-1:0] data_cap_i,
     input logic use_cap_base_i,
     input logic [`EXCEPTION_SIZE-1:0] cheri_mem_exc_i,
+    // TODO remove debug signal
+    output logic [2:0]   wdata_offset_o,   // mux control for data to be written to memory
 
     // exception signals
     output logic         load_err_o,
@@ -176,13 +178,20 @@ module ibex_load_store_unit (
         endcase // case (data_addr[1:0])
       end
 
-      /*
+      
       2'b11: begin // Writing a double
         unique case (data_addr[2:0])
-
+          3'b000:  data_be = 8'b1111_1111;
+          3'b001:  data_be = 8'b1111_1110;
+          3'b010:  data_be = 8'b1111_1100;
+          3'b011:  data_be = 8'b1111_1000;
+          3'b100:  data_be = 8'b1111_0000;
+          3'b101:  data_be = 8'b1110_0000;
+          3'b110:  data_be = 8'b1100_0000;
+          3'b111:  data_be = 8'b1000_0000;
         endcase
       end
-      */
+      
 
       default:     data_be = 'X;
     endcase // case (data_type_ex_i)
@@ -195,6 +204,7 @@ module ibex_load_store_unit (
   // prepare data to be written to the memory
   // we handle misaligned accesses, half word and byte accesses and
   // register offsets here
+  assign wdata_offset_o = data_addr[2:0];
   assign wdata_offset = data_addr[1:0] - data_reg_offset_ex_i[1:0];
   always_comb begin
     unique case (wdata_offset)
