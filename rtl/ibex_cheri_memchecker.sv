@@ -50,6 +50,8 @@ module ibex_cheri_memchecker #(
     input logic access_capability_i,
     input logic [7:0] data_be_i,
 
+    input logic [2:0] offset,
+
     output logic [64:0] mem_data_o,
     output logic [`CAP_SIZE-1:0] lsu_data_o,
     output logic [7:0] data_be_o,
@@ -79,7 +81,8 @@ module ibex_cheri_memchecker #(
 
   // TODO remove
   // temporarily throw trap on an unaligned access
-  assign cheri_mem_exc_o[MMU_PROHIBITS_STORE_VIOLATION] = access_capability_i && |(address_i[2:0]);
+  //assign cheri_mem_exc_o[MMU_PROHIBITS_STORE_VIOLATION] = access_capability_i && |(address_i[2:0]);
+  assign cheri_mem_exc_o[MMU_PROHIBITS_STORE_VIOLATION] = access_capability_i && |offset;
 
   // if this is a data memory checker, we need to make sure that if we're trying to read a capability
   // we check that it's properly aligned.

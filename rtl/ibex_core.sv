@@ -221,7 +221,7 @@ module ibex_core #(
   logic        data_we_ex;
   logic [1:0]  data_type_ex;
   logic        data_sign_ext_ex;
-  logic [1:0]  data_reg_offset_ex;
+  logic [2:0]  data_reg_offset_ex;
   logic        data_req_ex;
   logic [`CAP_SIZE-1:0] data_wdata_ex;
   logic [`CAP_SIZE-1:0] regfile_wdata_lsu;
@@ -637,6 +637,7 @@ module ibex_core #(
       .data_cap_i (mem_cap),
       .use_cap_base_i (use_cap_base),
       .cheri_mem_exc_i(cheri_data_exc),
+      .wdata_offset_o(lsu_offset),
       //.cheri_mem_exc_i(0),
 
       .addr_incr_req_o       ( lsu_addr_incr_req   ),
@@ -754,6 +755,7 @@ module ibex_core #(
   logic [`CAP_SIZE-1:0] data_rdata;
   logic [`CAP_SIZE-1:0] data_wdata;
   logic [7:0] data_be;
+  logic [2:0] lsu_offset;
 
   ibex_cheri_memchecker #(
       .DATA_MEM(1'b1)
@@ -771,6 +773,7 @@ module ibex_core #(
       .mem_data_i(data_rdata_i),
       .lsu_data_i(data_wdata),
       .data_be_i(data_be),
+      .offset(lsu_offset),
 
       .data_be_o(data_be_o),
       .mem_data_o(data_wdata_o),
@@ -793,6 +796,7 @@ module ibex_core #(
       .data_type_i(2'b0),
       .data_be_i(),
       .data_be_o(),
+      .offset(),
 
       // we never write instructions
       .write_i('0),
