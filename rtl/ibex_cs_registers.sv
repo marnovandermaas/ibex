@@ -371,9 +371,22 @@ module ibex_cs_registers #(
     mcountinhibit_we = 1'b0;
     mhpmcounter_we   = '0;
     mhpmcounterh_we  = '0;
-    mtcc_setOffset_cap = mtcc_q;
-    mtcc_setOffset_i = '0;
     mtcc_d = mtcc_q;
+    mtdc_d = mtdc_q;
+    mscratchc_d = mscratchc_q;
+    mepcc_d = mepcc_q;
+
+    utcc_d = utcc_q;
+    utdc_d = utdc_q;
+    uscratchc_d = uscratchc_q;
+    uepcc_d = uepcc_q;
+    stcc_d = stcc_q;
+    stdc_d = stdc_q;
+    sscratchc_d = sscratchc_q;
+    sepcc_d = sepcc_q;
+
+
+
 
     mepcc_setOffset_i = mepcc_offset;
 
@@ -484,26 +497,31 @@ module ibex_cs_registers #(
 
     unique case (scr_addr_i)
       SCR_DDC: begin
-        if (scr_we_int) begin
+        if (scr_we_int && !exc_o) begin
           ddc_d = scr_wdata_i;
         end
       end
 
       // TODO look at these again
       SCR_MEPCC: begin
-        if (scr_we_int) begin
-          mepcc_d = scr_wdata_i;
+        if (scr_we_int && !exc_o) begin
+          //mepcc_d = scr_wdata_i;
+
+          temp_getOffset_i = scr_wdata_i;
+          temp_setOffset_cap = scr_wdata_i;
+          temp_setOffset_i = {temp_getOffset_o[31:1], 1'b0};
+          mepcc_d = temp_setOffset_o;
         end
       end
 
       SCR_MTCC: begin
-        if (scr_we_int) begin
-          // TODO this will need changed once the spec is updated
-          // at the moment the cspecialrw instruction swaps the values blindly, but it needs to
-          // make sure that the bottom two bits of the mtvec that is read are valid and not reserved
-          mtcc_setOffset_cap = scr_wdata_i;
-          mtcc_setOffset_i = {scr_wdata_getOffset_o[31:2], 2'b0};
-          mtcc_d = mtcc_setOffset_o;
+        if (scr_we_int && !exc_o) begin
+          temp_getOffset_i = scr_wdata_i;
+          temp_setOffset_cap = scr_wdata_i;
+          // Sail allows setting the vectored/direct mode of mtvec and mtcc. allow it for now
+          //temp_setOffset_i = {temp_getOffset_o[31:2], 2'b01};
+          temp_setOffset_i = temp_getOffset_o;
+          mtcc_d = temp_setOffset_o;
         end
       end
 
@@ -521,13 +539,13 @@ module ibex_cs_registers #(
 
       // TODO REMOVE THESE EVENTUALLY
       SCR_UEPCC: begin
-        if (scr_we_int) begin
+        if (scr_we_int && !exc_o) begin
           uepcc_d = scr_wdata_i;
         end
       end
 
       SCR_UTCC: begin
-        if (scr_we_int) begin
+        if (scr_we_int && !exc_o) begin
           utcc_d = scr_wdata_i;
         end
       end
@@ -547,13 +565,13 @@ module ibex_cs_registers #(
 
 
       SCR_SEPCC: begin
-        if (scr_we_int) begin
+        if (scr_we_int && !exc_o) begin
           sepcc_d = scr_wdata_i;
         end
       end
 
       SCR_STCC: begin
-        if (scr_we_int) begin
+        if (scr_we_int && !exc_o) begin
           stcc_d = scr_wdata_i;
         end
       end
@@ -861,23 +879,24 @@ module_wrap64_getOffset module_getOffset_a (
   .wrap64_getOffset_cap(mtcc_q),
     .wrap64_getOffset(mtcc_offset));
 
-logic [`CAP_SIZE-1:0] mtcc_setOffset_cap;
-logic [`CAP_SIZE-1:0] mtcc_setOffset_i;
-logic [`CAP_SIZE:0] mtcc_setOffset_o;
-module_wrap64_setOffset module_wrap64_setOffset_a (
-  .wrap64_setOffset_cap(mtcc_setOffset_cap),
-    .wrap64_setOffset_offset(mtcc_setOffset_i),
-    .wrap64_setOffset(mtcc_setOffset_o));
+logic [`CAP_SIZE-1:0] temp_setOffset_cap;
+logic [`CAP_SIZE-1:0] temp_setOffset_i;
+logic [`CAP_SIZE:0] temp_setOffset_o;
+module_wrap64_setOffset module_wrap64_setOffset_temp (
+  .wrap64_setOffset_cap(temp_setOffset_cap),
+    .wrap64_setOffset_offset(temp_setOffset_i),
+    .wrap64_setOffset(temp_setOffset_o));
+
+logic [`CAP_SIZE-1:0] temp_getOffset_i;
+logic [`CAP_SIZE-1:0] temp_getOffset_o;
+module_wrap64_getOffset module_getOffset_scr (
+  .wrap64_getOffset_cap(temp_getOffset_i),
+    .wrap64_getOffset(temp_getOffset_o));
 
 logic [`CAP_SIZE-1:0] pc_id_i_getPerms_o;
 module_wrap64_getPerms module_wrap64_getPerms_pc_id_i (
   .wrap64_getPerms_cap(pc_id_i),
     .wrap64_getPerms(pc_id_i_getPerms_o));
-
-logic [`CAP_SIZE-1:0] scr_wdata_getOffset_o;
-module_wrap64_getOffset module_getOffset_scr (
-  .wrap64_getOffset_cap(scr_wdata_i),
-    .wrap64_getOffset(scr_wdata_getOffset_o));
 
 
 
