@@ -357,6 +357,13 @@ module ibex_cs_registers #(
 
   // write logic
   always_comb begin
+  temp_setOffset_i = '0;
+  temp_setOffset_cap = '0;
+  temp_getOffset_i = '0;
+
+
+
+
     exception_pc = pc_id_i;
 
     mstatus_d    = mstatus_q;
@@ -407,7 +414,22 @@ module ibex_cs_registers #(
       CSR_MSCRATCH: if (csr_we_int) mscratch_d = csr_wdata_int;
 
       // mepc: exception program counter
-      CSR_MEPC: if (csr_we_int) mepc_d = {csr_wdata_int[31:1], 1'b0};
+      //CSR_MEPC: if (csr_we_int) mepc_d = {csr_wdata_int[31:1], 1'b0};
+      CSR_MEPC: begin
+      if (csr_we_int)
+          temp_setOffset_cap = mepcc_q;
+          temp_setOffset_i = {csr_wdata_int[31:1], 1'b0};
+          mepcc_d = temp_setOffset_o;
+      end
+
+      CSR_MTVEC: begin
+      if (csr_we_int)
+          temp_setOffset_cap = mtcc_q;
+          temp_setOffset_i = {csr_wdata_int[31:1], 1'b0};
+          mtcc_d = temp_setOffset_o;
+      end
+
+
 
       // mcause
       CSR_MCAUSE: if (csr_we_int) mcause_d = {csr_wdata_int[31], csr_wdata_int[4:0]};
@@ -520,7 +542,7 @@ module ibex_cs_registers #(
           temp_setOffset_cap = scr_wdata_i;
           // Sail allows setting the vectored/direct mode of mtvec and mtcc. allow it for now
           //temp_setOffset_i = {temp_getOffset_o[31:2], 2'b01};
-          temp_setOffset_i = temp_getOffset_o;
+          temp_setOffset_i = {temp_getOffset_o[31:2], 1'b0, temp_getOffset_o[0]};
           mtcc_d = temp_setOffset_o;
         end
       end
