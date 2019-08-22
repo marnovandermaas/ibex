@@ -130,6 +130,31 @@ module ibex_cheri_alu (
   always_comb begin
     exceptions_a_o = '0;
     exceptions_b_o = '0;
+
+
+  alu_operand_a_o = '0;
+  alu_operand_b_o = '0;
+  alu_operator_o = ALU_ADD;
+  returnvalue_o = '0;
+  wroteCapability = '0;
+
+
+a_setBounds_i = '0;
+a_setType_i = '0;
+b_setType_i = '0;
+a_setPerms_i = '0;
+b_setPerms_i = '0;
+a_setFlags_i = '0;
+a_setOffset_i = '0;
+a_setValidCap_i = '0;
+b_setValidCap_i = '0;
+a_setAddr_i = '0;
+b_setAddr_i = '0;
+
+
+
+
+
     case (base_opcode_i)
       THREE_OP: begin
         case (threeop_opcode_i)
@@ -145,6 +170,8 @@ module ibex_cheri_alu (
           end
 
           C_SET_BOUNDS: begin
+            // TODO: can't use the alu adder here since we need more bits for the result (we care
+            // about the carry)
             a_setBounds_i = operand_b_i;
             returnvalue_o = a_setBounds_o[`CAP_SIZE-1:0];
             wroteCapability = 1'b1;
@@ -164,6 +191,10 @@ module ibex_cheri_alu (
             a_setBounds_i = operand_b_i;
             returnvalue_o = a_setBounds_o[`CAP_SIZE-1:0];
             wroteCapability = 1'b1;
+
+            alu_operand_a_o = a_getAddr_o;
+            alu_operand_b_o = operand_b_i;
+            alu_operator_o = ALU_ADD;
 
 
             exceptions_a_o =    (  exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
@@ -232,8 +263,13 @@ module ibex_cheri_alu (
 
           C_SET_OFFSET: begin
             a_setOffset_i = operand_b_i;
+
+            alu_operand_a_o = a_getBase_o;
+            alu_operand_b_o = operand_b_i;
+            alu_operator_o = ALU_ADD;
+
             returnvalue_o = a_setOffset_o[`CAP_SIZE] ? a_setOffset_o[`CAP_SIZE-1:0] :
-                                                      a_getBase_o + operand_b_i;
+                                                       a_getBase_o + operand_b_i;
             wroteCapability = a_setOffset_o[`CAP_SIZE];
 
             exceptions_a_o = exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION;
@@ -251,7 +287,12 @@ module ibex_cheri_alu (
           end
 
           C_INC_OFFSET: begin
+            // TODO remove adders here?
             a_setOffset_i = a_getOffset_o + operand_b_i;
+            alu_operand_a_o = a_getBase_o;
+            alu_operand_b_o = operand_b_i;
+            alu_operator_o = ALU_ADD;
+
             returnvalue_o = a_setOffset_o[`CAP_SIZE] ? a_setOffset_o[`CAP_SIZE-1:0] :
                                                       a_getAddr_o + operand_b_i;
             wroteCapability = a_setOffset_o[`CAP_SIZE];
@@ -272,18 +313,19 @@ module ibex_cheri_alu (
           end
 
           C_FROM_PTR: begin
-            // TODO rewrite this to remove the if statement
-            if (operand_b_i == '0) begin
-              // TODO minor optimisation: don't have a nullWithAddr in here and just mark it as not a cap?
-              nullWithAddr_i = operand_b_i;
-              returnvalue_o = nullWithAddr_o;
-              wroteCapability = 1'b1;
-            end else begin
-              a_setOffset_i = operand_b_i;
-              returnvalue_o = a_setOffset_o[`CAP_SIZE] ? a_setOffset_o[`CAP_SIZE-1:0] :
-                                                        a_getBase_o + operand_b_i;
-              wroteCapability = a_setOffset_o[`CAP_SIZE];
-            end
+            a_setOffset_i = operand_b_i;
+
+            alu_operand_a_o = a_getBase_o;
+            alu_operand_b_o = operand_b_i;
+            alu_operator_o = ALU_ADD;
+
+            returnvalue_o = operand_b_i == '0        ? operand_b_i :
+                            a_setOffset_o[`CAP_SIZE] ? a_setOffset_o[`CAP_SIZE-1:0] :
+                                                       a_getBase_o + operand_b_i;
+
+            wroteCapability = operand_b_i == '0        ? 1'b0 :
+                              a_setOffset_o[`CAP_SIZE] ? 1'b1 :
+                                                         1'b0;
 
             exceptions_a_o =  (operand_b_i != '0 && exceptions_a[TAG_VIOLATION]) << TAG_VIOLATION
                             | (operand_b_i != '0 && exceptions_a[SEAL_VIOLATION]) << SEAL_VIOLATION;
@@ -291,8 +333,12 @@ module ibex_cheri_alu (
           end
 
           C_SUB: begin
+            alu_operand_a_o = a_getAddr_o;
+            alu_operand_b_o = b_getAddr_o;
+            alu_operator_o = ALU_SUB;
+
             returnvalue_o = a_getAddr_o - b_getAddr_o;
-            wroteCapability = 0'b0;
+            wroteCapability = 1'b0;
             //$display("csub output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
@@ -500,6 +546,10 @@ module ibex_cheri_alu (
                 returnvalue_o = operand_a_i;
                 wroteCapability = 1'b1;
 
+                alu_operand_a_o = a_getAddr_o;
+                alu_operand_b_o = `MIN_INSTR_BYTES;
+                alu_operator_o = ALU_ADD;
+
                 exceptions_a_o = exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
                                 |exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
                                 |exceptions_a[PERMIT_EXECUTE_VIOLATION] << PERMIT_EXECUTE_VIOLATION
@@ -542,9 +592,10 @@ module ibex_cheri_alu (
       end
 
       C_INC_OFFSET_IMM: begin
-        // TODO immediate from ibex should already be sign-extended, so might be able to just skip sign-extension stuff here
+        // TODO remove adders?
         a_setOffset_i = a_getOffset_o + operand_b_i;
-        returnvalue_o = a_setOffset_o[`CAP_SIZE] ? a_setOffset_o : a_getAddr_o + (operand_b_i[`IMM_SIZE-1] ? {{`INTEGER_SIZE-`IMM_SIZE{1'b1}}, operand_b_i} : operand_b_i);
+        //returnvalue_o = a_setOffset_o[`CAP_SIZE] ? a_setOffset_o : a_getAddr_o + (operand_b_i[`IMM_SIZE-1] ? {{`INTEGER_SIZE-`IMM_SIZE{1'b1}}, operand_b_i} : operand_b_i);
+        returnvalue_o = a_setOffset_o[`CAP_SIZE] ? a_setOffset_o : a_getAddr_o + operand_b_i;
         wroteCapability = a_setOffset_o[`CAP_SIZE];
 
         exceptions_a_o = exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION;
@@ -553,15 +604,18 @@ module ibex_cheri_alu (
 
       C_SET_BOUNDS_IMM: begin
         // need to truncate input since we want it to be unsigned
-        // TODO there has to be a cleaner way of doing this
         a_setBounds_i = operand_b_i[`IMM_SIZE-1:0];
         returnvalue_o = a_setBounds_o[`CAP_SIZE-1:0];
         wroteCapability = 1'b1;
 
+        alu_operand_a_o = a_getAddr_o;
+        alu_operand_b_o = {{`INTEGER_SIZE-`IMM_SIZE{1'b0}}, operand_b_i[`IMM_SIZE-1:0]};
+        alu_operator_o = ALU_ADD;
+
         exceptions_a_o = exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
                         |exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
                         |exceptions_a[LENGTH_VIOLATION] << LENGTH_VIOLATION
-                        |((a_getAddr_o+operand_b_i[11:0] > a_getTop_o) << LENGTH_VIOLATION);
+                        |((a_getAddr_o + operand_b_i[`IMM_SIZE-1:0] > a_getTop_o) << LENGTH_VIOLATION);
             //$display("csetboundsimm output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
       end
 
@@ -576,443 +630,13 @@ module ibex_cheri_alu (
 
 
 
-// stuff i think the CHERI ALU needs to do:
-/*  getPerm
-    getType
-    getBase
-    getLen
-    getTag
-    getSealed
-    getOffset
-    getFlags
-    getAddr
-
-
-
-
-
-
-
-*/
-
-
-
-
-
-/*
-
-module_wrap64_nullCap nullCap_3 (wrap64_nullCap);
-
-mmodule module_wrap64_almightyCap(wrap64_almightyCap);
-odule module_wrap64_almightyCap(wrap64_almightyCap);
-
-
-
-
-module_wrap64_getAddr getAddr_1 (wrap64_getAddr_cap,
-			     wrap64_getAddr);
-module_wrap64_getAddr getAddr_2 (wrap64_getAddr_cap,
-			     wrap64_getAddr);
-module_wrap64_getAddr getAddr_3 (wrap64_getAddr_cap,
-			     wrap64_getAddr);
-
-module_wrap64_fromMem fromMem_1 (wrap64_fromMem_mem_cap,
-			     wrap64_fromMem);
-module_wrap64_fromMem fromMem_2 (wrap64_fromMem_mem_cap,
-			     wrap64_fromMem);
-module_wrap64_fromMem fromMem_3 (wrap64_fromMem_mem_cap,
-			     wrap64_fromMem);
-
-
-
-
-
-module_wrap64_validAsType validAsType_1 (wrap64_validAsType_dummy,
-				 wrap64_validAsType_checkType,
-				 wrap64_validAsType);
-module_wrap64_validAsType validAsType_2 (wrap64_validAsType_dummy,
-				 wrap64_validAsType_checkType,
-				 wrap64_validAsType);
-module_wrap64_validAsType validAsType_3 (wrap64_validAsType_dummy,
-				 wrap64_validAsType_checkType,
-				 wrap64_validAsType);
-
-module_wrap64_toMem toMem_1 (wrap64_toMem_cap,
-			   wrap64_toMem);
-module_wrap64_toMem toMem_2 (wrap64_toMem_cap,
-			   wrap64_toMem);
-module_wrap64_toMem toMem_3 (wrap64_toMem_cap,
-			   wrap64_toMem);
-
-module_wrap64_setValidCap setValidCap_1 (wrap64_setValidCap_cap,
-				 wrap64_setValidCap_valid,
-				 wrap64_setValidCap);
-module_wrap64_setValidCap setValidCap_2 (wrap64_setValidCap_cap,
-				 wrap64_setValidCap_valid,
-				 wrap64_setValidCap);
-module_wrap64_setValidCap setValidCap_3 (wrap64_setValidCap_cap,
-				 wrap64_setValidCap_valid,
-				 wrap64_setValidCap);
-
-module_wrap64_setType setType_1 (wrap64_setType_cap,
-			     wrap64_setType_otype,
-			     wrap64_setType);
-module_wrap64_setType setType_2 (wrap64_setType_cap,
-			     wrap64_setType_otype,
-			     wrap64_setType);
-module_wrap64_setType setType_3 (wrap64_setType_cap,
-			     wrap64_setType_otype,
-			     wrap64_setType);
-
-module_wrap64_setSoftPerms setSoftPerms_1 (wrap64_setSoftPerms_cap,
-				  wrap64_setSoftPerms_softperms,
-				  wrap64_setSoftPerms);
-module_wrap64_setSoftPerms setSoftPerms_2 (wrap64_setSoftPerms_cap,
-				  wrap64_setSoftPerms_softperms,
-				  wrap64_setSoftPerms);
-module_wrap64_setSoftPerms setSoftPerms_3 (wrap64_setSoftPerms_cap,
-				  wrap64_setSoftPerms_softperms,
-				  wrap64_setSoftPerms);
-
-module_wrap64_setPerms setPerms_1 (wrap64_setPerms_cap,
-			      wrap64_setPerms_perms,
-			      wrap64_setPerms);
-module_wrap64_setPerms setPerms_2 (wrap64_setPerms_cap,
-			      wrap64_setPerms_perms,
-			      wrap64_setPerms);
-module_wrap64_setPerms setPerms_3 (wrap64_setPerms_cap,
-			      wrap64_setPerms_perms,
-			      wrap64_setPerms);
-
-module_wrap64_setOffset setOffset_1 (wrap64_setOffset_cap,
-			       wrap64_setOffset_offset,
-			       wrap64_setOffset);
-module_wrap64_setOffset setOffset_2 (wrap64_setOffset_cap,
-			       wrap64_setOffset_offset,
-			       wrap64_setOffset);
-module_wrap64_setOffset setOffset_3 (wrap64_setOffset_cap,
-			       wrap64_setOffset_offset,
-			       wrap64_setOffset);
-
-module_wrap64_setHardPerms setHardPerms_1 (wrap64_setHardPerms_cap,
-				  wrap64_setHardPerms_hardperms,
-				  wrap64_setHardPerms);
-module_wrap64_setHardPerms setHardPerms_2 (wrap64_setHardPerms_cap,
-				  wrap64_setHardPerms_hardperms,
-				  wrap64_setHardPerms);
-module_wrap64_setHardPerms setHardPerms_3 (wrap64_setHardPerms_cap,
-				  wrap64_setHardPerms_hardperms,
-				  wrap64_setHardPerms);
-
-module_wrap64_setFlags setFlags_1 (wrap64_setFlags_cap,
-			      wrap64_setFlags);
-module_wrap64_setFlags setFlags_2 (wrap64_setFlags_cap,
-			      wrap64_setFlags);
-module_wrap64_setFlags setFlags_3 (wrap64_setFlags_cap,
-			      wrap64_setFlags);
-
-module_wrap64_setBounds setBounds_1 (wrap64_setBounds_cap,
-			       wrap64_setBounds_length,
-			       wrap64_setBounds);
-module_wrap64_setBounds setBounds_2 (wrap64_setBounds_cap,
-			       wrap64_setBounds_length,
-			       wrap64_setBounds);
-module_wrap64_setBounds setBounds_3 (wrap64_setBounds_cap,
-			       wrap64_setBounds_length,
-			       wrap64_setBounds);
-
-module_wrap64_setAddr setAddr_1 (wrap64_setAddr_cap,
-			     wrap64_setAddr_addr,
-			     wrap64_setAddr);
-module_wrap64_setAddr setAddr_2 (wrap64_setAddr_cap,
-			     wrap64_setAddr_addr,
-			     wrap64_setAddr);
-module_wrap64_setAddr setAddr_3 (wrap64_setAddr_cap,
-			     wrap64_setAddr_addr,
-			     wrap64_setAddr);
-module_wrap64_nullWithAddr nullWithAddr_1 (wrap64_nullWithAddr_addr,
-				  wrap64_nullWithAddr);
-module_wrap64_nullWithAddr nullWithAddr_2 (wrap64_nullWithAddr_addr,
-				  wrap64_nullWithAddr);
-module_wrap64_isValidCap isValidCap_1 (wrap64_isValidCap_cap,
-				wrap64_isValidCap);
-module_wrap64_isValidCap isValidCap_2 (wrap64_isValidCap_cap,
-				wrap64_isValidCap);
-module_wrap64_isValidCap isValidCap_3 (wrap64_isValidCap_cap,
-				wrap64_isValidCap);
-module_wrap64_isSentry isSentry_1 (wrap64_isSentry_cap,
-			      wrap64_isSentry);
-module_wrap64_isSentry isSentry_2 (wrap64_isSentry_cap,
-			      wrap64_isSentry);
-module_wrap64_isSentry isSentry_3 (wrap64_isSentry_cap,
-			      wrap64_isSentry);
-module_wrap64_isSealedWithType isSealedWithType_1 (wrap64_isSealedWithType_cap,
-				      wrap64_isSealedWithType);
-module_wrap64_isSealedWithType isSealedWithType_2 (wrap64_isSealedWithType_cap,
-				      wrap64_isSealedWithType);
-module_wrap64_isSealedWithType isSealedWithType_3 (wrap64_isSealedWithType_cap,
-				      wrap64_isSealedWithType);
-module_wrap64_isSealed isSealed_1 (wrap64_isSealed_cap,
-			      wrap64_isSealed);
-module_wrap64_isSealed isSealed_2 (wrap64_isSealed_cap,
-			      wrap64_isSealed);
-module_wrap64_isSealed isSealed_3 (wrap64_isSealed_cap,
-			      wrap64_isSealed);
-module_wrap64_isInBounds isInBounds_1 (wrap64_isInBounds_cap,
-				wrap64_isInBounds_isTopIncluded,
-				wrap64_isInBounds);
-module_wrap64_isInBounds isInBounds_2 (wrap64_isInBounds_cap,
-				wrap64_isInBounds_isTopIncluded,
-				wrap64_isInBounds);
-module_wrap64_isInBounds isInBounds_3 (wrap64_isInBounds_cap,
-				wrap64_isInBounds_isTopIncluded,
-				wrap64_isInBounds);
-module_wrap64_getType getType_1 (wrap64_getType_cap,
-			     wrap64_getType);
-module_wrap64_getType getType_2 (wrap64_getType_cap,
-			     wrap64_getType);
-module_wrap64_getType getType_3 (wrap64_getType_cap,
-			     wrap64_getType);
-module_wrap64_getTop getTop_1 (wrap64_getTop_cap,
-			    wrap64_getTop);
-module_wrap64_getTop getTop_2 (wrap64_getTop_cap,
-			    wrap64_getTop);
-module_wrap64_getTop getTop_3 (wrap64_getTop_cap,
-			    wrap64_getTop);
-
-module_wrap64_getSoftPerms getSoftPerms_1 (wrap64_getSoftPerms_cap,
-				  wrap64_getSoftPerms);
-module_wrap64_getSoftPerms getSoftPerms_2 (wrap64_getSoftPerms_cap,
-				  wrap64_getSoftPerms);
-module_wrap64_getSoftPerms getSoftPerms_3 (wrap64_getSoftPerms_cap,
-				  wrap64_getSoftPerms);
-
-module_wrap64_getPerms getPerms_1 (wrap64_getPerms_cap,
-			      wrap64_getPerms);
-module_wrap64_getPerms getPerms_2 (wrap64_getPerms_cap,
-			      wrap64_getPerms);
-module_wrap64_getPerms getPerms_3 (wrap64_getPerms_cap,
-			      wrap64_getPerms);
-
-module_wrap64_getOffset getOffset_1 (wrap64_getOffset_cap,
-			       wrap64_getOffset);
-module_wrap64_getOffset getOffset_2 (wrap64_getOffset_cap,
-			       wrap64_getOffset);
-module_wrap64_getOffset getOffset_3 (wrap64_getOffset_cap,
-			       wrap64_getOffset);
-
-module_wrap64_getLength getLength_1 (wrap64_getLength_cap,
-			       wrap64_getLength);
-module_wrap64_getLength getLength_2 (wrap64_getLength_cap,
-			       wrap64_getLength);
-module_wrap64_getLength getLength_3 (wrap64_getLength_cap,
-			       wrap64_getLength);
-
-module_wrap64_getKind getKind_1 (wrap64_getKind_cap,
-			     wrap64_getKind);
-module_wrap64_getKind getKind_2 (wrap64_getKind_cap,
-			     wrap64_getKind);
-module_wrap64_getKind getKind_3 (wrap64_getKind_cap,
-			     wrap64_getKind);
-
-module_wrap64_getHardPerms getHardPerms_1 (wrap64_getHardPerms_cap,
-				  wrap64_getHardPerms);
-module_wrap64_getHardPerms getHardPerms_2 (wrap64_getHardPerms_cap,
-				  wrap64_getHardPerms);
-module_wrap64_getHardPerms getHardPerms_3 (wrap64_getHardPerms_cap,
-				  wrap64_getHardPerms);
-
-
-module_wrap64_getBase getBase_1 (wrap64_getBase_cap,
-			     wrap64_getBase);
-module_wrap64_getBase getBase_2 (wrap64_getBase_cap,
-			     wrap64_getBase);
-module_wrap64_getBase getBase_3 (wrap64_getBase_cap,
-			     wrap64_getBase);
-
-
-
-
-
-
-module_wrap64_getFlags getFlags_a_module (wrap64_getFlags_cap,
-			      wrap64_getFlags);
-module_wrap64_getFlags getFlags_b_module (wrap64_getFlags_cap,
-			      wrap64_getFlags);
-module_wrap64_getFlags getFlags_pcc_module (wrap64_getFlags_cap,
-			      wrap64_getFlags);
-module_wrap64_getFlags getFlags_ddc_module (wrap64_getFlags_cap,
-			      wrap64_getFlags);
-
-
-
-
-
-// TODO implement all these things
-// TODO implement all these things for operand b
-
-module_wrap64_getAddr module_getAddr_a (
-    .wrap64_getAddr_cap(operand_a),
-    .wrap64_getAddr(a_getAddr));
-
-
-
-module_wrap64_getBase module_getBase_a (
-    .wrap64_getBase_cap(operand_a),
-    .wrap64_getBase(a_getBase));
-
-
-
-module_wrap64_getFlags module_getFlags_a (
-  .wrap64_getFlags_cap(operand_a),
-    .wrap64_getFlags(a_getFlags));
-
-
-
-module_wrap64_getHardPerms module_getHardPerms_a (
-  .wrap64_getHardPerms_cap(operand_a),
-    .wrap64_getHardPerms(a_getHardPerms));
-
-
-
-module_wrap64_getKind module_getKind_a (
-  .wrap64_getKind_cap(operand_a),
-    .wrap64_getKind(a_getKind));
-
-
-
-module_wrap64_getLength module_getLength_a (
-  .wrap64_getLength_cap(operand_a),
-    .wrap64_getLength(a_getLength));
-
-
-
-module_wrap64_getOffset module_getOffset_a (
-  .wrap64_getOffset_cap(operand_a),
-    .wrap64_getOffset(a_getOffset));
-
-
-
-module_wrap64_getPerms module_wrap64_getPerms_a (
-  .wrap64_getPerms_cap(operand_a),
-    .wrap64_getPerms(a_getPerms));
-
-
-
-module_wrap64_getSoftPerms module_wrap64_getSoftPerms_a (
-  .wrap64_getSoftPerms_cap(operand_a),
-    .wrap64_getSoftPerms(a_getSoftPerms));
-
-
-
-module_wrap64_getTop module_wrap64_getTop_a (
-  .wrap64_getTop_cap(operand_a),
-    .wrap64_getTop(a_getTop));
-
-
-
-module_wrap64_getType module_wrap64_getType_a (
-  .wrap64_getType_cap(operand_a),
-    .wrap64_getType(a_getType));
-
-
-
-module_wrap64_isInBounds module_wrap64_isInBounds_a (
-  .wrap64_isInBounds_cap(operand_a),
-    .wrap64_isInBounds_isTopIncluded(a_isInBounds_isTopIncluded),
-    .wrap64_isInBounds(a_isInBounds));
-
-module_wrap64_isSealed module_wrap64_isSealed_a (
-  .wrap64_isSealed_cap(operand_a),
-    .wrap64_isSealed(a_isSealed));
-
-
-
-module_wrap64_isSealedWithType module_wrap64_isSealedWithType_a (
-  .wrap64_isSealedWithType_cap(operand_a),
-    .wrap64_isSealedWithType(a_isSealedWithType));
-
-
-
-module_wrap64_isSentry module_wrap64_isSentry_a (
-  .wrap64_isSentry_cap(operand_a),
-    .wrap64_isSentry(a_isSentry));
-
-
-
-module_wrap64_isValidCap module_wrap64_isValidCap_a (
-  .wrap64_isValidCap_cap(operand_a),
-    .wrap64_isValidCap(a_isValidCap));
-
-
-
-module_wrap64_setAddr module_wrap64_setAddr_a (
-  .wrap64_setAddr_cap(operand_a),
-    .wrap64_setAddr_addr(a_setAddr_addr),
-    .wrap64_setAddr(a_setAddr));
-
-
-module_wrap64_setBounds module_wrap64_setBounds_a (
-  .wrap64_setBounds_cap(operand_a),
-    .wrap64_setBounds_length(a_setBounds_length),
-    .wrap64_setBounds(a_setBounds));
-
-
-module_wrap64_setFlags module_wrap64_setFlags_a (
-  .wrap64_setFlags_cap(operand_a),
-    .wrap64_setFlags_flags(a_setFlags_flags),
-    .wrap64_setFlags(a_setFlags));
-
-
-module_wrap64_setHardPerms module_wrap64_setHardPerms_a (
-  .wrap64_setHardPerms_cap(operand_a),
-    .wrap64_setHardPerms_hardperms(a_setHardPerms_hardperms),
-    .wrap64_setHardPerms(a_setHardPerms));
-
-
-module_wrap64_setOffset module_wrap64_setOffset_a (
-  .wrap64_setOffset_cap(operand_a),
-    .wrap64_setOffset_offset(a_setOffset_offset),
-    .wrap64_setOffset(a_setOffset));
-
-
-module_wrap64_setPerms module_wrap64_setPerms_a (
-  .wrap64_setPerms_cap(operand_a),
-    .wrap64_setPerms_perms(a_setPerms_perms),
-    .wrap64_setPerms(a_setPerms));
-
-
-module_wrap64_setSoftPerms module_wrap64_setSoftPerms_a (
-  .wrap64_setSoftPerms_cap(operand_a),
-    .wrap64_setSoftPerms_softperms(a_setSoftPerms_softperms),
-    .wrap64_setSoftPerms(a_setSoftPerms));
-
-
-module_wrap64_setType module_wrap64_setType_a (
-  .wrap64_setType_cap(operand_a),
-    .wrap64_setType_otype(a_setType_otype),
-    .wrap64_setType(a_setType));
-
-
-module_wrap64_setValidCap module_wrap64_setValidCap_a (
-  .wrap64_setValidCap_cap(operand_a),
-    .wrap64_setValidCap_valid(a_setValidCap_valid),
-    .wrap64_setValidCap(a_setValidCap));
-
-
-module_wrap64_validAsType module_wrap64_validAsType_a (wrap64_validAsType_dummy,
-				 wrap64_validAsType_checkType,
-				 wrap64_validAsType);
-
-*/
-
-
 
 
 
 // TODO need to make all of these the correct size
+// TODO need to initialize these all to 0
 
-logic [`CAP_SIZE-1:0] a_setBounds_i;
+logic [`INTEGER_SIZE-1:0] a_setBounds_i;
 logic [`CAP_SIZE:0] a_setBounds_o;
 module_wrap64_setBounds module_wrap64_setBounds_a (
     .wrap64_setBounds_cap(operand_a_i),
@@ -1020,52 +644,52 @@ module_wrap64_setBounds module_wrap64_setBounds_a (
     .wrap64_setBounds(a_setBounds_o));
 
 
-logic [`CAP_SIZE-1:0] a_getAddr_o;
+logic [`INTEGER_SIZE-1:0] a_getAddr_o;
 module_wrap64_getAddr module_getAddr_a (
     .wrap64_getAddr_cap(operand_a_i),
     .wrap64_getAddr(a_getAddr_o));
 
-logic [`CAP_SIZE-1:0] b_getAddr_o;
+logic [`INTEGER_SIZE-1:0] b_getAddr_o;
 module_wrap64_getAddr module_getAddr_b (
     .wrap64_getAddr_cap(operand_b_i),
     .wrap64_getAddr(b_getAddr_o));
 
-logic [`CAP_SIZE-1:0] a_getTop_o;
+logic [`INTEGER_SIZE:0] a_getTop_o;
 module_wrap64_getTop module_wrap64_getTop_a (
   .wrap64_getTop_cap(operand_a_i),
     .wrap64_getTop(a_getTop_o));
 
-logic [`CAP_SIZE-1:0] b_getTop_o;
+logic [`INTEGER_SIZE:0] b_getTop_o;
 module_wrap64_getTop module_wrap64_getTop_b (
   .wrap64_getTop_cap(operand_b_i),
     .wrap64_getTop(b_getTop_o));
 
-logic [`CAP_SIZE-1:0] a_setType_i;
+logic [`OTYPE_SIZE-1:0] a_setType_i;
 logic [`CAP_SIZE:0] a_setType_o;
 module_wrap64_setType module_wrap64_setType_a (
   .wrap64_setType_cap(operand_a_i),
     .wrap64_setType_otype(a_setType_i),
     .wrap64_setType(a_setType_o));
 
-logic [`CAP_SIZE-1:0] b_setType_i;
+logic [`OTYPE_SIZE-1:0] b_setType_i;
 logic [`CAP_SIZE:0] b_setType_o;
 module_wrap64_setType module_wrap64_setType_b (
   .wrap64_setType_cap(operand_b_i),
     .wrap64_setType_otype(b_setType_i),
     .wrap64_setType(b_setType_o));
 
-logic [`CAP_SIZE-1:0] a_getPerms_o;
+logic [`PERMS_SIZE-1:0] a_getPerms_o;
 module_wrap64_getPerms module_wrap64_getPerms_a (
   .wrap64_getPerms_cap(operand_a_i),
     .wrap64_getPerms(a_getPerms_o));
 
-logic [`CAP_SIZE-1:0] b_getPerms_o;
+logic [`PERMS_SIZE-1:0] b_getPerms_o;
 module_wrap64_getPerms module_wrap64_getPerms_b (
   .wrap64_getPerms_cap(operand_b_i),
     .wrap64_getPerms(b_getPerms_o));
 
 
-logic [`CAP_SIZE-1:0] a_setPerms_i;
+logic [`PERMS_SIZE-1:0] a_setPerms_i;
 logic [`CAP_SIZE-1:0] a_setPerms_o;
 module_wrap64_setPerms module_wrap64_setPerms_a (
   .wrap64_setPerms_cap(operand_a_i),
@@ -1073,21 +697,21 @@ module_wrap64_setPerms module_wrap64_setPerms_a (
     .wrap64_setPerms(a_setPerms_o));
 
 
-logic [`CAP_SIZE-1:0] b_setPerms_i;
+logic [`PERMS_SIZE-1:0] b_setPerms_i;
 logic [`CAP_SIZE-1:0] b_setPerms_o;
 module_wrap64_setPerms module_wrap64_setPerms_b (
   .wrap64_setPerms_cap(operand_b_i),
     .wrap64_setPerms_perms(b_setPerms_i),
     .wrap64_setPerms(b_setPerms_o));
 
-logic [`CAP_SIZE-1:0] a_setFlags_i;
+logic a_setFlags_i;
 logic [`CAP_SIZE-1:0] a_setFlags_o;
 module_wrap64_setFlags module_wrap64_setFlags_a (
   .wrap64_setFlags_cap(operand_a_i),
     .wrap64_setFlags_flags(a_setFlags_i),
     .wrap64_setFlags(a_setFlags_o));
 
-logic [`CAP_SIZE-1:0] a_setOffset_i;
+logic [`INTEGER_SIZE-1:0] a_setOffset_i;
 logic [`CAP_SIZE:0] a_setOffset_o;
 module_wrap64_setOffset module_wrap64_setOffset_a (
   .wrap64_setOffset_cap(operand_a_i),
@@ -1124,12 +748,6 @@ logic [`CAP_SIZE-1:0] b_isValidCap_o;
 module_wrap64_isValidCap module_wrap64_isValidCap_b (
   .wrap64_isValidCap_cap(operand_b_i),
     .wrap64_isValidCap(b_isValidCap_o));
-
-
-logic [`CAP_SIZE-1:0] nullWithAddr_i;
-logic [`CAP_SIZE-1:0] nullWithAddr_o;
-module_wrap64_nullWithAddr nullWithAddr (.wrap64_nullWithAddr_addr(nullWithAddr_i),
-				  .wrap64_nullWithAddr(nullWithAddr_o));
 
 
 logic [`CAP_SIZE-1:0] a_isSealed_o;
