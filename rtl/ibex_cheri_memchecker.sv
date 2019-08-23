@@ -69,10 +69,8 @@ module ibex_cheri_memchecker #(
 
   assign cheri_mem_exc_o[TAG_VIOLATION] = !base_isValidCap_o;
   assign cheri_mem_exc_o[SEAL_VIOLATION] = base_isSealed_o;
-  // TODO load violations should only occur for reads
-  assign cheri_mem_exc_o[PERMIT_LOAD_VIOLATION] = !write_i && !cap_base_i_getPerms_o[2];// TODO finish this;
-  // TODO store violations should only occur for writes
-  assign cheri_mem_exc_o[PERMIT_STORE_VIOLATION] = write_i && !cap_base_i_getPerms_o[3];// TODO finish this;
+  assign cheri_mem_exc_o[PERMIT_LOAD_VIOLATION] = !write_i && !cap_base_i_getPerms_o[2];
+  assign cheri_mem_exc_o[PERMIT_STORE_VIOLATION] = write_i && !cap_base_i_getPerms_o[3];
 
   // TODO should load/store capability violations ever happen?
 
@@ -86,8 +84,6 @@ module ibex_cheri_memchecker #(
 
   // if this is a data memory checker, we need to make sure that if we're trying to read a capability
   // we check that it's properly aligned.
-  // this might need to be done in the ID stage since we don't (and shouldn't) have access to the data
-  // being read and written in here
 
   // read stuff
   always_comb begin

@@ -92,12 +92,10 @@ module ibex_prefetch_buffer (
 
       .clear_i               ( fifo_clear        ),
 
-      // TODO remove caps?
       .in_addr_i             ( instr_addr_q      ),
       .in_rdata_i            ( instr_rdata_i     ),
       .in_valid_i            ( fifo_valid        ),
       .in_ready_o            ( fifo_ready        ),
-
 
       .out_valid_o           ( valid_o           ),
       .out_ready_i           ( ready_i           ),
@@ -113,7 +111,9 @@ module ibex_prefetch_buffer (
   ////////////////
 
   //assign fetch_addr = {instr_addr_q[31:2], 2'b00} + 32'd4;
-  // TODO pcc stuff
+  // for testing against TestRIG, we need this to keep the aligment of the instructions
+  // that came before. TestRIG also doesn't output compressed instructions yet so we
+  // don't need to deal with those
   assign fetch_addr = {instr_addr_q[31:0]} + 32'd4;
   assign fifo_clear = branch_i;
 
@@ -135,7 +135,6 @@ module ibex_prefetch_buffer (
         instr_req_o = 1'b0;
 
         if (branch_i) begin
-          // TODO addr_i will become a PCC so i will need to get its address instead
           instr_addr = addr_i_getAddr_o;
         end
 
@@ -245,20 +244,23 @@ module ibex_prefetch_buffer (
   /////////////////
   // Output Addr //
   /////////////////
-  // TODO pcc stuff
   assign instr_addr_w_aligned = {instr_addr[31:2], 2'b00};
 
-  // TODO set this to a capability
-  //assign instr_cap_o         =  instr_addr_w_aligned;
   assign instr_addr_o         =  instr_addr_w_aligned;
 
 
 // TODO change to offset
+  // update the output pcc
+  // this is the pcc of the instruction that is currently being fed to the if stage for it to feed
+  // to the id stage.
   always_comb begin
     pcc_setAddr1_i = addr_fifo;
     addr_o = pcc_setAddr1_o[`CAP_SIZE-1:0];
   end
 
+  // update the output capability
+  // this is the capability that is used for accessing memory. this is different to the capability
+  // above because this one will always be word-aligned since we only do word-aligned accesses
   always_comb begin
     pcc_setAddr2_i = instr_addr_w_aligned;
     instr_cap_o = pcc_setAddr2_o[`CAP_SIZE-1:0];
@@ -270,7 +272,6 @@ module_wrap64_getAddr module_getAddr_addr_i (
     .wrap64_getAddr_cap(addr_i),
     .wrap64_getAddr(addr_i_getAddr_o));
 
-// TODO these should not have addr_i in them
 logic [`CAP_SIZE-1:0] pcc_setAddr1_i;
 logic [`CAP_SIZE:0] pcc_setAddr1_o;
 module_wrap64_setAddr pcc_setAddr1 (

@@ -13,9 +13,6 @@
 // Description:    Fetch fifo                                                 //
 ////////////////////////////////////////////////////////////////////////////////
 
-// TODO put this in makefile
-`define CAP_SIZE 93
-
 /**
  * Fetch Fifo for 32 bit memory interface
  *
@@ -56,6 +53,8 @@ module ibex_fetch_fifo (
   logic [DEPTH-1:0]         valid_n,   valid_int,   valid_q;
 
   //logic             [31:2]  addr_next;
+  // this needs to be made longer because for TestRIG we want to maintain the alignment information
+  // so that the PC matches what TestRIG is expecting
   logic             [31:0]  addr_next;
   logic             [31:0]  rdata, rdata_unaligned;
   logic                     valid, valid_unaligned;
@@ -88,12 +87,9 @@ module ibex_fetch_fifo (
     // serve the aligned case even though the output address is unaligned when
     // the next instruction will be from a hardware loop target
     // in this case the current instruction is already prealigned in element 0
-    // TODO fix this
-    //      issue: this makes ibex assume that the next instruction is a
-    //          compressed one if the PC is a multiple of 2 regardless of
-    //          what the instruction that has been read in is
-    //      temp fix: comment out the test
-
+    // if we're not using an actual memory to get the data (ie if using RVFI-DII) the instruction
+    // is already pre-aligned so we don't want to realign it.
+    // hence we never want the condition on this to be true
     if (0/*out_addr_o[1]*/) begin
       // unaligned case
       out_rdata_o = rdata_unaligned;
@@ -158,11 +154,11 @@ module ibex_fetch_fifo (
   end
 
   //assign addr_next[31:2] = addr_int[0][31:2] + 30'h1;
-  // TODO pcc stuff
+  // this needs to be made longer because for TestRIG we want to maintain the alignment information
+  // so that the PC matches what TestRIG is expecting
   assign addr_next[31:0] = addr_int[0][31:0] + 30'h4;
 
   // move everything by one step
-  // TODO pcc stuff
   always_comb begin
     addr_n     = addr_int;
     rdata_n    = rdata_int;
@@ -201,7 +197,6 @@ module ibex_fetch_fifo (
 
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      // TODO pcc stuff
       addr_q    <= '{default: '0};
       rdata_q   <= '{default: '0};
       valid_q   <= '0;

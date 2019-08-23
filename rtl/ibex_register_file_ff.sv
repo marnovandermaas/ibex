@@ -76,7 +76,7 @@ module ibex_register_file #(
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
       //rf_reg_tmp <= '{default:'0};
-      for (int i = 0; i < NUM_WORDS; i++) begin
+      for (int i = 1; i < NUM_WORDS; i++) begin
         // TODO this should be initialized to the null cap for synthesis
         rf_reg_tmp[i] <= `ALMIGHTY;
       end

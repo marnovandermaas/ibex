@@ -230,12 +230,4 @@ module ibex_ex_block #(
   // ALU output valid in same cycle, multiplier/divider may require multiple cycles
   assign ex_valid_o = multdiv_en ? multdiv_valid : 1'b1;
 
-// TODO undo this
-logic [`CAP_SIZE-1:0] cheri_jump_addr;
-module_wrap64_getAddr module_getAddr_a (
-    .wrap64_getAddr_cap(cheri_result),
-    .wrap64_getAddr(cheri_jump_addr));
-
-
-
 endmodule

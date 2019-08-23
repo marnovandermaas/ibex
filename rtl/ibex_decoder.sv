@@ -114,7 +114,7 @@ module ibex_decoder #(
     output logic [1:0]               data_reg_offset_o,     // register byte offset for stores
     output logic mem_cap_access_o,
 
-    // not really for LSU
+    // tell ID stage whether the instruction requires ddc or a capability from a register
     output logic mem_ddc_relative_o,
 
     // jump/branches
@@ -201,7 +201,6 @@ module ibex_decoder #(
   // Decoder //
   /////////////
 
-  // TODO ask about this
   /* TODO: need to tell whatever is reading from registers whether it should pass the register value
    through a getAddr (if the value is an integer) or not (if it's a capability)
    This isn't needed if not using CHERI, so we'll want to wrap them with `ifdefs
@@ -232,7 +231,9 @@ module ibex_decoder #(
     multdiv_signed_mode_o       = 2'b00;
 
     cheri_en_o                  = 1'b0;
-    cheri_imm_b_mux_sel_o       = CHERI_OP_B_REG_NUM;
+    cheri_op_a_mux_sel_o = CHERI_OP_A_REG_NUM;
+    cheri_op_b_mux_sel_o = CHERI_OP_B_REG_NUM;
+    cheri_imm_b_mux_sel_o       = CHERI_IMM_B_I;
     cheri_a_en_o = 1'b0;
     cheri_b_en_o = 1'b0;
     cheri_base_opcode_o = cheri_base_opcode;
@@ -240,6 +241,7 @@ module ibex_decoder #(
     cheri_store_opcode_o = cheri_store_opcode;
     cheri_load_opcode_o = cheri_load_opcode;
     cheri_sad_opcode_o = cheri_sad_opcode;
+    use_cap_base_o = 1'b0;
 
     mem_ddc_relative_o = '0;
 
@@ -373,7 +375,6 @@ module ibex_decoder #(
           2'b01: data_type_o = 2'b01; // SH
           2'b10: data_type_o = 2'b00; // SW
           2'b11: begin
-            // TODO if in cap encoding mode, need to change stuff
             data_type_o = 2'b11; // SD
             mem_cap_access_o = 1'b1;
             use_cap_base_o = 1'b0;
@@ -405,7 +406,6 @@ module ibex_decoder #(
           2'b01:   data_type_o = 2'b01; // LH
           2'b10:   data_type_o = 2'b00; // LW
           2'b11: begin
-            // TODO if in cap encoding mode, need to change stuff
             data_type_o = 2'b11; // LD
             mem_cap_access_o = 1'b1;
             use_cap_base_o = 1'b0;
@@ -729,7 +729,7 @@ module ibex_decoder #(
                   regfile_wdata_sel_o = RF_WD_CSR;
                   regfile_we = regfile_waddr_o != '0;
                   //scr_op_o = scr_op_e'{regfile_waddr_o != '0, regfile_raddr_a_o != '0};
-                  scr_op_o = scr_op_e'{regfile_waddr_o != '0, regfile_raddr_a_o != '0};
+                  scr_op_o = scr_op_e'({regfile_waddr_o != '0, regfile_raddr_a_o != '0});
                   cheri_en_o = 1'b1;
                   cheri_op_b_mux_sel_o = CHERI_OP_B_IMM;
                   cheri_imm_b_mux_sel_o = CHERI_IMM_B_RS2;
@@ -738,25 +738,7 @@ module ibex_decoder #(
                 end
               end
 
-              C_COPY_TYPE: begin
-                regfile_we          = 1'b1;
-                cheri_op_b_mux_sel_o = CHERI_OP_B_REG_CAP;
-                cheri_b_en_o = 1'b1;
-              end
-
-              C_SEAL: begin
-                regfile_we          = 1'b1;
-                cheri_op_b_mux_sel_o = CHERI_OP_B_REG_CAP;
-                cheri_b_en_o = 1'b1;
-              end
-
-              C_C_SEAL: begin
-                regfile_we          = 1'b1;
-                cheri_op_b_mux_sel_o = CHERI_OP_B_REG_CAP;
-                cheri_b_en_o = 1'b1;
-              end
-
-              C_UNSEAL: begin
+              C_COPY_TYPE, C_SEAL, C_C_SEAL, C_UNSEAL: begin
                 regfile_we          = 1'b1;
                 cheri_op_b_mux_sel_o = CHERI_OP_B_REG_CAP;
                 cheri_b_en_o = 1'b1;
@@ -783,11 +765,9 @@ module ibex_decoder #(
               end
 
               // special instructions
-              // TODO stores
               // for loads and stores, we don't need to get the ALU involved apart from calculating
               // the effective address after adding the immediate.
               STORE: begin
-                //cheri_op_b_mux_sel_o = CHERI_OP_B_REG_NUM;
                 data_req_o = 1'b1;
                 data_we_o = 1'b1;
                 cheri_en_o = 1'b0;
@@ -887,8 +867,14 @@ module ibex_decoder #(
                     end
                   end
 
-                  default: begin
+                C_GET_PERM, C_GET_TYPE, C_GET_BASE, C_GET_LEN, C_GET_TAG, C_GET_SEALED, C_GET_OFFSET,
+                C_GET_FLAGS, C_MOVE, C_CLEAR_TAG, CLEAR, C_GET_ADDR, C_FP_CLEAR: begin
+                    // these don't need any extra work in here
+                    illegal_insn = 1'b0;
+                end
 
+                  default: begin
+                    illegal_insn = 1'b1;
                   end
                 endcase
               end
@@ -899,13 +885,13 @@ module ibex_decoder #(
             endcase
           end
 
-          C_INC_OFFSET_IMM: begin //
+          C_INC_OFFSET_IMM: begin
                 regfile_we          = 1'b1;
                 cheri_op_b_mux_sel_o = CHERI_OP_B_IMM;
                 cheri_imm_b_mux_sel_o = CHERI_IMM_B_I;
           end
 
-          C_SET_BOUNDS_IMM: begin //
+          C_SET_BOUNDS_IMM: begin
                 regfile_we          = 1'b1;
                 cheri_op_b_mux_sel_o = CHERI_OP_B_IMM;
                 cheri_imm_b_mux_sel_o = CHERI_IMM_B_I;

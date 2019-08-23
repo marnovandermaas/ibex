@@ -45,8 +45,9 @@ module ibex_if_stage #(
     output logic                      instr_req_o,
     // this is the pcc
     output logic [`CAP_SIZE-1:0]               instr_cap_o,
-    // TODO look at this again
-    // this becomes meaningless if we have a PCC
+    // this is the address that is passed to memory. This is also used to check memory access
+    // TODO need to make this an offset from the pcc.
+    // ie if this says 128 then we really want pcc.base + 128
     output logic [31:0]               instr_addr_o,
     input  logic                      instr_gnt_i,
     input  logic                      instr_rvalid_i,
@@ -64,7 +65,8 @@ module ibex_if_stage #(
     output logic                      illegal_c_insn_id_o,      // compressed decoder thinks this
                                                                 // is an invalid instr
 
-    // TODO these have both become PCCs. should there also be a PC for RVFI purposes?
+    // these have become PCCs, so we need to pass a PC for RVFI purposes.
+    // this is done using the pc_next
     output logic [`CAP_SIZE-1:0]               pc_if_o,
     output logic [`CAP_SIZE-1:0]               pc_id_o,
 
@@ -81,7 +83,12 @@ module ibex_if_stage #(
                                                                 // vectorized interrupt lines
 
     // jump and branch target and decision
-    input  logic [`CAP_SIZE-1:0]               jump_target_ex_i,         // jump target address
+    input  logic [`CAP_SIZE-1:0]               jump_target_ex_i,         // jump target
+                                                                // this can be an address or a
+                                                                // capability
+                                                                // if cap_jump_i is high, then
+                                                                // it's a capability, otherwise
+                                                                // it's an address
     input logic cap_jump_i,
 
     // CSRs
@@ -92,6 +99,8 @@ module ibex_if_stage #(
     input  logic                      id_in_ready_i,            // ID stage is ready for new instr
 
     // misc signals
+    // TODO remove or rework this next signal
+    // this is used to pass the next pc to the RVFI signals.
     output logic [31:0]               pc_next,
     output logic                      if_busy_o,                // IF stage is busy fetching instr
     output logic                      perf_imiss_o              // instr fetch miss
@@ -124,8 +133,9 @@ module ibex_if_stage #(
   logic [`CAP_SIZE-1:0] curr_pc_cap_d;
   logic [`CAP_SIZE-1:0] curr_pc_cap_q;
 
+  // the target capability to set pcc to
   logic [`CAP_SIZE-1:0] jump_target;
-  // TODO THIS USES THE PC IN THE ID STAGE, MIGHT NEED TO BE CHANGED
+
   assign jump_target = cap_jump_i ? jump_target_ex_i : pc_id_o_setOffset_o;
 
   assign curr_pc_cap_d = branch_req ? fetch_addr_n : curr_pc_cap_q;
@@ -161,7 +171,11 @@ module ibex_if_stage #(
   always_comb begin : fetch_addr_mux
     unique case (pc_mux_i)
       //PC_BOOT: fetch_addr_n = { boot_addr_i[31:8], 8'h00 };
+      `ifdef DII
       PC_BOOT: fetch_addr_n = `ALMIGHTY_OFFSET_TESTRIG;
+      `else
+      PC_BOOT: fetch_addr_n = `ALMIGHTY_CAP;
+      `endif
       PC_JUMP: fetch_addr_n = jump_target;
       PC_EXC:  fetch_addr_n = exc_pc;                       // set PC to exception handler
       // TODO need to change this back to capability stuff
@@ -170,7 +184,6 @@ module ibex_if_stage #(
       default: fetch_addr_n = 'X;
     endcase
 
-    // TODO this will need changed
     pc_next = pc_mux_i == PC_BOOT ? {mtcc_getAddr_o[31:2], 2'b00} : fetch_addr_n_getAddr_o;
   end
 

@@ -668,7 +668,7 @@ module ibex_core #(
   logic [`CAP_SIZE-1:0] scr_wdata;
   logic [`CAP_SIZE-1:0] scr_rdata;
   logic [`CAP_SIZE-1:0] scr_mtcc;
-  logic [4:0] scr_addr;
+  scr_num_e scr_addr;
   scr_op_e scr_op;
   logic scr_access;
   logic scr_exc;
@@ -787,8 +787,6 @@ module ibex_core #(
       // TODO this breaks when we try to jump since we're fetching an instruction which we wanted to fetch using
       // a different PCC
       .cap_base_i(instr_cap),
-      // we expect the capability we get above to always point to the address we want, so we
-      // hardwire the offset to 0
       .address_i(instr_addr_o),
       // TODO if we want to properly implement compressed instructions we're going to have to pass in
       // a proper type
@@ -972,12 +970,14 @@ module ibex_core #(
 `endif
 
 
-// TODO probably remove
 
+// This is needed for the RVFI signal generation
+`ifdef RVFI
 logic [31:0] pcc_getAddr_o;
 module_wrap64_getAddr module_getAddr_a (
     .wrap64_getAddr_cap(pc_if),
     .wrap64_getAddr(pcc_getAddr_o));
+`endif
 
 
 

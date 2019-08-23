@@ -460,7 +460,11 @@ module ibex_load_store_unit (
   always_comb begin
     addr_last_d = addr_last_q;
     if (data_req_o & data_gnt_i & ~(load_err_o | store_err_o)) begin
-      addr_last_d = data_addr;
+      //addr_last_d = data_addr;
+      // this can't simply be the last address, because the address calculated there already includes the
+      // capability base. if we were to use that one, then when performing multicycle loads/stores,
+      // we would add the capability offset twice which is incorrect
+      addr_last_d = adder_result_ex_i;
     end
   end
 

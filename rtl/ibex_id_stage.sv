@@ -258,7 +258,6 @@ module ibex_id_stage #(
   logic [1:0]  multdiv_signed_mode;
 
   // CHERI
-    logic cheri_en_o;
     cheri_base_opcode_e       cheri_base_opcode;
     cheri_threeop_funct7_e    cheri_threeop_opcode;
     cheri_store_funct5_e      cheri_store_opcode;
@@ -309,7 +308,6 @@ module ibex_id_stage #(
   assign alu_op_b_mux_sel = lsu_addr_incr_req_i ? OP_B_IMM        : alu_op_b_mux_sel_dec;
   assign imm_b_mux_sel    = lsu_addr_incr_req_i ? IMM_B_INCR_ADDR : imm_b_mux_sel_dec;
 
-
   /*
     There are 4 cases for memory accesses:
       We're doing a legacy instruction with PCC.flag = 0
@@ -324,27 +322,9 @@ module ibex_id_stage #(
       We're doing a new instruction which is not ddc-relative
         In this case we want to pass only the capability contents of the register
   */
-
-  // TODO this is wrong, because it means that when doing a cheri load it will try to use DDC when it shouldn't
-  // TODO look through this:
-  /*
-  assign mem_cap_o = !cheri_en_o && pcc_getFlags_o && mem_cap_access_o ? regfile_rdata_a_cap :
-                     !cheri_en_o && pcc_getFlags_o && !mem_cap_access_o ? regfile_rdata_a_cap :
-                     !cheri_en_o && !pcc_getFlags_o && mem_cap_access_o ? scr_ddc_i :
-                     !cheri_en_o && !pcc_getFlags_o && !mem_cap_access_o ? scr_ddc_i :
-                     mem_ddc_relative ? scr_ddc_i :
-                     regfile_rdata_a_cap;
-                     */
   assign mem_cap_o = mem_ddc_relative ? scr_ddc_i : regfile_rdata_a_cap;
 
 
-
-  /*
-  assign mem_cap_o = !cheri_en_o && !pcc_getFlags_o ? scr_ddc_i :
-                     !cheri_en_o && pcc_getFlags_o ? scr_ddc_i : // TODO replace this scr_ddc_i with cap from registers
-                     mem_ddc_relative ? scr_ddc_i :
-                     regfile_rdata_a_cap;
-                     */
 
   ///////////////////
   // Operand A MUX //
@@ -370,8 +350,6 @@ module ibex_id_stage #(
       CHERI_OP_A_REG_CAP: cheri_operand_a_o = regfile_rdata_a_cap;
       CHERI_OP_A_REG_NUM: cheri_operand_a_o = regfile_rdata_a;
       CHERI_OP_A_REG_DDC: cheri_operand_a_o = regfile_raddr_a == '0 ? scr_ddc_i : regfile_rdata_a_cap;
-      // TODO is this needed?
-      CHERI_OP_A_FWD:   cheri_operand_a_o = lsu_addr_last_i;
       CHERI_OP_A_PCC: cheri_operand_a_o = pc_id_i;
       default:          cheri_operand_a_o = 'X;
     endcase
@@ -391,7 +369,7 @@ module ibex_id_stage #(
       IMM_B_J:         imm_b = imm_j_type;
       IMM_B_INCR_PC:   imm_b = instr_is_compressed_i ? 32'h2 : 32'h4;
       IMM_B_INCR_ADDR: imm_b = 32'h4;
-      IMM_B_ZERO:      imm_b = 32'0;
+      IMM_B_ZERO:      imm_b = 32'h0;
       default:         imm_b = 'X;
     endcase
   end
@@ -500,7 +478,7 @@ module ibex_id_stage #(
   assign rfvi_reg_raddr_rb_o = regfile_raddr_b;
   assign rfvi_reg_rdata_rb_o = regfile_rdata_b;
   assign rfvi_reg_waddr_rd_o = regfile_waddr;
-  // TODO fix
+  // RVFI expects the integer contents of the register - these are stored in the address
   assign rfvi_reg_wdata_rd_o = rd_wdata_getAddr_o;
   assign rfvi_reg_we_o       = regfile_we;
 `endif
