@@ -541,8 +541,10 @@ module ibex_cs_registers #(
           temp_getOffset_i = scr_wdata_i;
           temp_setOffset_cap = scr_wdata_i;
           // Sail allows setting the vectored/direct mode of mtvec and mtcc. allow it for now
+          // Sail also sets the mode to direct when an instruction tries to set it to a reserved
+          // value. For now, define this as our behaviour as well
           //temp_setOffset_i = {temp_getOffset_o[31:2], 2'b01};
-          temp_setOffset_i = {temp_getOffset_o[31:2], 1'b0, temp_getOffset_o[0]};
+          temp_setOffset_i = {temp_getOffset_o[31:2], 1'b0, !temp_getOffset_o[1] && temp_getOffset_o[0]};
           mtcc_d = temp_setOffset_o;
         end
       end
