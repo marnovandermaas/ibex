@@ -12,6 +12,10 @@
 #include "socket_packet_utils.h"
 #include <stdlib.h>
 
+#define MEM_BASE_WORDS 0x20000000
+#define MEM_SIZE_BYTES 0x2000000
+#define MEM_SIZE_WORDS 0x2000000/4
+
 
 struct RVFI_DII_Execution_Packet {
     std::uint64_t rvfi_order : 64;      // [00 - 07] Instruction number:      INSTRET value after completion.
@@ -74,14 +78,14 @@ double sc_time_stamp() {
     return main_time;
 }
 
+RVFI_DII_Execution_Packet readRVFI(Vibex_core_avalon *top, bool signExtend);
+void sendReturnTrace(std::vector<RVFI_DII_Execution_Packet> &returnTrace, unsigned long long socket);
 
 // This will open a socket on the hostname and port provided
 // It will then try to receive RVFI-DII packets and put the instructions
 // from them into the core and simulate it.
 // The RVFI trace is then sent back
 int main(int argc, char** argv, char** env) {
-
-
 
     if (argc != 3) {
         std::cerr << "wrong number of args" << std::endl;
@@ -99,21 +103,19 @@ int main(int argc, char** argv, char** env) {
     trace_obj.open("vlt_d.vcd");
     #endif
 
-    uint8_t *memory = (uint8_t *) malloc(0x2000000);
+    // initialise memory and tags
+    uint8_t *memory = (uint8_t *) malloc(MEM_SIZE_BYTES);
     if (memory == NULL) {
         std::cout << "memory is null" << std::endl;
     }
-    bool *tags = (bool *) malloc(0x2000000/8);
+    bool *tags = (bool *) malloc(MEM_SIZE_BYTES/8);
     if (tags == NULL) {
         std::cout << "tags is null" << std::endl;
     }
 
-    //std::cout << "init socket" << std::endl;
+    // initialize the socket with the input parameters
     unsigned long long socket = serv_socket_create(argv[1], std::atoi(argv[2]));
-    //std::cout << "created" << std::endl;
     serv_socket_init(socket);
-    //std::cout << "inited" << std::endl;
-
 
     // set up initial core inputs
     top->clk_i = 0;
@@ -139,35 +141,10 @@ int main(int argc, char** argv, char** env) {
     std::vector<RVFI_DII_Instruction_Packet> instructions;
     std::vector<RVFI_DII_Execution_Packet> returntrace;
     while (1) {
-        //std::cout << "main loop begin" << std::endl;
-
-        // send back execution trace
         // send back execution trace if the number of instructions that have come out is equal to the
         // number that have gone in
-        //std::cout << "send" << std::endl;
-        // TODO clean up bulk sending
-        if (returntrace.size() > 0 && out_count == in_count) {
-            int tosend = 1;
-            for (int i = 0; i < returntrace.size(); i+=tosend) {
-                tosend = 1;
-                RVFI_DII_Execution_Packet sendarr[50];
-                sendarr[0] = returntrace[i];
-
-                // bulk send if possible
-                if (returntrace.size() - i > 50) {
-                    tosend = 50;
-                    for (int j = 0; j < tosend; j++) {
-                        sendarr[j] = returntrace[i+j];
-                    }
-                }
-                // loop to make sure that the packet has been properly sent
-                while (
-                    !serv_socket_putN(socket, sizeof(RVFI_DII_Execution_Packet) * tosend, (unsigned int *) sendarr)
-                ) {
-                    // empty
-                }
-            }
-            returntrace.clear();
+        if (returntrace.size() > 0 && in_count == out_count) {
+            sendReturnTrace(returntrace, socket);
         }
 
         // set up a packet and try to receive packets if the number of instructions that we've put in is
@@ -175,8 +152,6 @@ int main(int argc, char** argv, char** env) {
         RVFI_DII_Instruction_Packet *packet;
         //std::cout << "receive" << std::endl;
         while (in_count >= received) {
-            //std::cout << "in_count: " << in_count << " received: " << received << std::endl;
-
             // try to receive a packet
             serv_socket_getN((unsigned int *) recbuf, socket, sizeof(RVFI_DII_Instruction_Packet));
 
@@ -222,28 +197,8 @@ int main(int argc, char** argv, char** env) {
             // the condition to read data here is that there is an rvfi valid signal
             // this deals with counting instructions that the core has finished executing
             if (in_count - out_count > 0 && top->rvfi_valid) {
-                RVFI_DII_Execution_Packet execpacket = {
-                    .rvfi_order = top->rvfi_order,
-                    .rvfi_pc_rdata = top->rvfi_pc_rdata,// | ((top->rvfi_pc_rdata & 0x80000000) ? 0xffffffff00000000 : 0),
-                    .rvfi_pc_wdata = top->rvfi_pc_wdata,// | ((top->rvfi_pc_wdata & 0x80000000) ? 0xffffffff00000000 : 0),
-                    .rvfi_insn = top->rvfi_insn,// | ((top->rvfi_insn & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_rs1_data = top->rvfi_rs1_rdata,// | ((top->rvfi_rs1_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_rs2_data = top->rvfi_rs2_rdata,// | ((top->rvfi_rs2_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_rd_wdata = top->rvfi_rd_wdata,// | ((top->rvfi_rd_wdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_mem_addr = top->rvfi_mem_addr,// | ((top->rvfi_mem_addr & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_mem_rdata = top->rvfi_mem_rdata,// | ((top->rvfi_mem_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_mem_wdata = top->rvfi_mem_wdata,// | ((top->rvfi_mem_wdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_mem_rmask = top->rvfi_mem_rmask,
-                    .rvfi_mem_wmask = top->rvfi_mem_wmask,
-                    .rvfi_rs1_addr = top->rvfi_rs1_addr,
-                    .rvfi_rs2_addr = top->rvfi_rs2_addr,
-                    .rvfi_rd_addr = top->rvfi_rd_addr,
-                    .rvfi_trap = top->rvfi_trap,
-                    .rvfi_halt = top->rst_i,
-                    .rvfi_intr = top->rvfi_intr
-                };
+                RVFI_DII_Execution_Packet execpacket = readRVFI(top, false);
 
-                std::cout << "mem_wdata: " << std::hex << execpacket.rvfi_mem_wdata << std::endl;
                 returntrace.push_back(execpacket);
 
                 out_count++;
@@ -309,11 +264,11 @@ int main(int argc, char** argv, char** env) {
                     top->rst_i = 1;
 
                     // clear memory
-                    for (int i = 0; i < 0x2000000/*(sizeof(memory)/sizeof(memory[0]))*/; i++) {
+                    for (int i = 0; i < MEM_SIZE_BYTES; i++) {
                         memory[i] = 0;
                     }
 
-                    for (int i = 0; i < (0x2000000/8)/*(sizeof(tags)/sizeof(tags[0]))*/; i++) {
+                    for (int i = 0; i < (MEM_SIZE_BYTES/8); i++) {
                         tags[i] = 0;
                     }
 
@@ -326,30 +281,9 @@ int main(int argc, char** argv, char** env) {
             // the condition to read data here is that the core has just been reset
             // this deals with counting reset instruction packets from TestRIG
             if (in_count - out_count > 0 && top->rst_i) {
-                RVFI_DII_Execution_Packet execpacket = {
-                    .rvfi_order = top->rvfi_order,
-                    .rvfi_pc_rdata = top->rvfi_pc_rdata,// | ((top->rvfi_pc_rdata & 0x80000000) ? 0xffffffff00000000 : 0),
-                    .rvfi_pc_wdata = top->rvfi_pc_wdata,// | ((top->rvfi_pc_wdata & 0x80000000) ? 0xffffffff00000000 : 0),
-                    .rvfi_insn = top->rvfi_insn,// | ((top->rvfi_insn & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_rs1_data = top->rvfi_rs1_rdata,// | ((top->rvfi_rs1_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_rs2_data = top->rvfi_rs2_rdata,// | ((top->rvfi_rs2_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_rd_wdata = top->rvfi_rd_wdata,// | ((top->rvfi_rd_wdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_mem_addr = top->rvfi_mem_addr,// | ((top->rvfi_mem_addr & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_mem_rdata = top->rvfi_mem_rdata,// | ((top->rvfi_mem_rdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_mem_wdata = top->rvfi_mem_wdata,// | ((top->rvfi_mem_wdata & 0x80000000) ? 0xffffffff00000000 : 0 ),
-                    .rvfi_mem_rmask = top->rvfi_mem_rmask,
-                    .rvfi_mem_wmask = top->rvfi_mem_wmask,
-                    .rvfi_rs1_addr = top->rvfi_rs1_addr,
-                    .rvfi_rs2_addr = top->rvfi_rs2_addr,
-                    .rvfi_rd_addr = top->rvfi_rd_addr,
-                    .rvfi_trap = top->rvfi_trap,
-                    .rvfi_halt = top->rst_i,
-                    .rvfi_intr = top->rvfi_intr
-                };
+                RVFI_DII_Execution_Packet execpacket = readRVFI(top, false);
 
                 returntrace.push_back(execpacket);
-
-                std::cout << "mem_wdata: " << std::hex << execpacket.rvfi_mem_wdata << std::endl;
 
                 out_count++;
             }
@@ -362,7 +296,7 @@ int main(int argc, char** argv, char** env) {
                 // TestRIG specifies that byte addresses must be between 0x80000000 and 0x80008000
                 // our avalon wrapper divides the byte address by 4 in order to get a word address
                 // so we need to check for addresses between 0x20003fff and 0x20000000
-                if (address > 0x207fffff || address < 0x20000000) {
+                if (address >= (MEM_BASE_WORDS + MEM_SIZE_WORDS) || address < MEM_BASE_WORDS) {
                     // the core tried to read from an address outside the specified range
                     // set the signals appropriately
                     top->avm_main_response = 0b11;
@@ -371,6 +305,7 @@ int main(int argc, char** argv, char** env) {
                     top->avm_main_readdata[1] = 0xdeadbeef & belu[(top->avm_main_byteenable) >> 4];
                     top->avm_main_readdata[2] = 0;
                     top->avm_main_readdatavalid = 1;
+                    std::cout << "out of bounds memory access - address: 0x" << std::hex << address << std::endl;
                 } else {
                     // the core tried to read from an address within the specified range
                     // we need to get the correct data from memory
@@ -390,41 +325,11 @@ int main(int argc, char** argv, char** env) {
                     // if not, set it to 0
                     unsigned int data[3] = {0};
                     // TODO clean this up into a for loop
-                    data[1] |= ((top->avm_main_byteenable>>7) & 0x1) ? memory[address] : 0;
-
-                    address--;
-                    data[1]<<=8;
-
-                    data[1] |= ((top->avm_main_byteenable>>6) & 0x1) ? memory[address] : 0;
-
-                    address--;
-                    data[1]<<=8;
-
-                    data[1] |= ((top->avm_main_byteenable>>5) & 0x1) ? memory[address] : 0;
-
-                    address--;
-                    data[1]<<=8;
-
-                    data[1] |= ((top->avm_main_byteenable>>4) & 0x1) ? memory[address] : 0;
-
-                    address--;
-
-                    data[0] |= ((top->avm_main_byteenable>>3) & 0x1) ? memory[address] : 0;
-
-                    address--;
-                    data[0]<<=8;
-
-                    data[0] |= ((top->avm_main_byteenable>>2) & 0x1) ? memory[address] : 0;
-
-                    address--;
-                    data[0]<<=8;
-
-                    data[0] |= ((top->avm_main_byteenable>>1) & 0x1) ? memory[address] : 0;
-
-                    address--;
-                    data[0]<<=8;
-
-                    data[0] |= ((top->avm_main_byteenable>>0) & 0x1) ? memory[address] : 0;
+                    const int BPW = 7;
+                    for (int i = 0; i <= BPW; i++) {
+                        data[(BPW - i)/4] <<= 8;
+                        data[(BPW - i)/4] |= ((top->avm_main_byteenable>>(BPW-i)) & 0x1) ? memory[address-i] : 0;
+                    }
 
                     // set the tag
                     data[2] = tags[address/8];
@@ -447,11 +352,12 @@ int main(int argc, char** argv, char** env) {
                 // TestRIG specifies that byte addresses must be between 0x80000000 and 0x80008000
                 // our avalon wrapper divides the byte address by 4 in order to get a word address
                 // so we need to check for addresses between 0x20003fff and 0x20000000
-                if (address > 0x207fffff || address < 0x20000000) {
+                if (address > (MEM_BASE_WORDS + MEM_SIZE_WORDS) || address < MEM_BASE_WORDS) {
                     // the core tried to write to an address outside the specified range
                     // set the signals appropriately
                     top->avm_main_response = 0b11;
                     top->avm_main_waitrequest = 0;
+                    std::cout << "out of bounds memory access - address: 0x" << std::hex << address << std::endl;
                 } else {
                     // the core tried to read from an address within the specified range
 
@@ -473,50 +379,11 @@ int main(int argc, char** argv, char** env) {
 
                     // we want to only change the memory values for which byteenable is high
                     // if byteenable is low, preserve that byte in memory
-                    memory[address] = (top->avm_main_byteenable & 0x1) ? data[0] : memory[address];
-                    address++;
-                    data[0]>>=8;
-
-                    memory[address] = ((top->avm_main_byteenable>>1) & 0x1) ? data[0] : memory[address];
-                    address++;
-                    data[0]>>=8;
-
-                    memory[address] = ((top->avm_main_byteenable>>2) & 0x1) ? data[0] : memory[address];
-                    address++;
-                    data[0]>>=8;
-
-                    memory[address] = ((top->avm_main_byteenable>>3) & 0x1) ? data[0] : memory[address];
-                    address++;
-                    // TODO this next line can be skipped
-                    data[0]>>=8;
-
-                    memory[address] = ((top->avm_main_byteenable>>4) & 0x1) ? data[1] : memory[address];
-                    address++;
-                    data[1]>>=8;
-
-                    memory[address] = ((top->avm_main_byteenable>>5) & 0x1) ? data[1] : memory[address];
-                    address++;
-                    data[1]>>=8;
-
-                    memory[address] = ((top->avm_main_byteenable>>6) & 0x1) ? data[1] : memory[address];
-                    address++;
-                    data[1]>>=8;
-
-                    memory[address] = ((top->avm_main_byteenable>>7) & 0x1) ? data[1] : memory[address];
-
-                    //std::cout << std::hex << "wrote memory at 0x" << (address-7)
-                    //                                              << ": 0x"
-                    //                                              << std::to_string(memory[address]) << "_"
-                    //                                              << std::to_string(memory[address-1]) << "_"
-                    //                                              << std::to_string(memory[address-2]) << "_"
-                    //                                              << std::to_string(memory[address-3]) << "_"
-                    //                                              << std::to_string(memory[address-4]) << "_"
-                    //                                              << std::to_string(memory[address-5]) << "_"
-                    //                                              << std::to_string(memory[address-6]) << "_"
-                    //                                              << std::to_string(memory[address-7])
-                    //                                              << " tag: " << tags[address/8]
-                    //                                              << std::endl;
-
+                    const int BPW = 8;
+                    for (int i = 0; i < BPW; i++) {
+                        memory[address + i] = (top->avm_main_byteenable>>i & 0x1) ? data[i/4] : memory[address + i];
+                        data[i/4] >>= 8;
+                    }
 
                     // set output signals appropriately
                     top->avm_main_response = 0b00;
@@ -566,3 +433,69 @@ int main(int argc, char** argv, char** env) {
     delete top;
     exit(0);
 }
+
+// send the return trace that is passed in over the socket that is passed in
+void sendReturnTrace(std::vector<RVFI_DII_Execution_Packet> &returntrace, unsigned long long socket) {
+    const int BULK_SEND = 50;
+
+    if (returntrace.size() > 0) {
+        int tosend = 1;
+        for (int i = 0; i < returntrace.size(); i+=tosend) {
+            tosend = 1;
+            RVFI_DII_Execution_Packet sendarr[BULK_SEND];
+            sendarr[0] = returntrace[i];
+
+            // bulk send if possible
+            if (returntrace.size() - i > BULK_SEND) {
+                tosend = BULK_SEND;
+                for (int j = 0; j < tosend; j++) {
+                    sendarr[j] = returntrace[i+j];
+                }
+            }
+
+            // loop to make sure that the packet has been properly sent
+            while (
+                !serv_socket_putN(socket, sizeof(RVFI_DII_Execution_Packet) * tosend, (unsigned int *) sendarr)
+            ) {
+                // empty
+            }
+        }
+        returntrace.clear();
+    }
+}
+
+RVFI_DII_Execution_Packet readRVFI(Vibex_core_avalon *top, bool signExtend) {
+    unsigned long long signExtension;
+    if (signExtend) {
+        signExtension = 0xFFFFFFFF00000000;
+    } else {
+        signExtension = 0x0000000000000000;
+    }
+
+    RVFI_DII_Execution_Packet execpacket = {
+        .rvfi_order = top->rvfi_order,
+        .rvfi_pc_rdata = top->rvfi_pc_rdata | ((top->rvfi_pc_rdata & 0x80000000) ? signExtension : 0),
+        .rvfi_pc_wdata = top->rvfi_pc_wdata | ((top->rvfi_pc_wdata & 0x80000000) ? signExtension : 0),
+        .rvfi_insn = top->rvfi_insn | ((top->rvfi_insn & 0x80000000) ? signExtension : 0 ),
+        .rvfi_rs1_data = top->rvfi_rs1_rdata | ((top->rvfi_rs1_rdata & 0x80000000) ? signExtension : 0 ),
+        .rvfi_rs2_data = top->rvfi_rs2_rdata | ((top->rvfi_rs2_rdata & 0x80000000) ? signExtension : 0 ),
+        .rvfi_rd_wdata = top->rvfi_rd_wdata | ((top->rvfi_rd_wdata & 0x80000000) ? signExtension : 0 ),
+        .rvfi_mem_addr = top->rvfi_mem_addr | ((top->rvfi_mem_addr & 0x80000000) ? signExtension : 0 ),
+        .rvfi_mem_rdata = top->rvfi_mem_rdata | ((top->rvfi_mem_rdata & 0x80000000) ? signExtension : 0 ),
+        .rvfi_mem_wdata = top->rvfi_mem_wdata | ((top->rvfi_mem_wdata & 0x80000000) ? signExtension : 0 ),
+        .rvfi_mem_rmask = top->rvfi_mem_rmask,
+        .rvfi_mem_wmask = top->rvfi_mem_wmask,
+        .rvfi_rs1_addr = top->rvfi_rs1_addr,
+        .rvfi_rs2_addr = top->rvfi_rs2_addr,
+        .rvfi_rd_addr = top->rvfi_rd_addr,
+        .rvfi_trap = top->rvfi_trap,
+        .rvfi_halt = top->rst_i,
+        .rvfi_intr = top->rvfi_intr
+    };
+
+    return execpacket;
+}
+
+
+
+
