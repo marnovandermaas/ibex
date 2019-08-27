@@ -368,7 +368,8 @@ module ibex_id_stage #(
       IMM_B_U:         imm_b = imm_u_type;
       IMM_B_J:         imm_b = imm_j_type;
       IMM_B_INCR_PC:   imm_b = instr_is_compressed_i ? 32'h2 : 32'h4;
-      IMM_B_INCR_ADDR: imm_b = 32'h4;
+      // this needs to be changed from 4 to 8 for double-aligned memory
+      IMM_B_INCR_ADDR: imm_b = 32'h8;
       IMM_B_ZERO:      imm_b = 32'h0;
       default:         imm_b = 'X;
     endcase

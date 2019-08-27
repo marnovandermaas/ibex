@@ -24,6 +24,7 @@ FILELIST=../rtl/avalon/ibex_core_avalon.sv \
 			../rtl/ibex_tracer.sv \
 			../rtl/ibex_cheri_alu.sv \
 			../rtl/ibex_cheri_memchecker.sv \
+			../rtl/ibex_cheri_tag_mem.sv \
 			../rtl/cheri/*
 
 TARGET=ibex_core_avalon

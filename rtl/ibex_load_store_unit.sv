@@ -95,16 +95,17 @@ module ibex_load_store_unit (
 );
 
   logic [31:0]  data_addr;
-  logic [31:0]  data_addr_w_aligned;
+  //logic [31:0]  data_addr_w_aligned;
+  logic [31:0]  data_addr_d_aligned;
   logic [31:0]  addr_last_q, addr_last_d;
 
   logic [`CAP_SIZE-1:0]  rdata_q, rdata_d;
-  logic [1:0]   rdata_offset_q, rdata_offset_d;
+  logic [2:0]   rdata_offset_q, rdata_offset_d;
   logic [1:0]   data_type_q, data_type_d;
   logic         data_sign_ext_q, data_sign_ext_d;
   logic         data_we_q, data_we_d;
 
-  logic [1:0]   wdata_offset;   // mux control for data to be written to memory
+  logic [2:0]   wdata_offset;   // mux control for data to be written to memory
 
   logic [7:0]   data_be;
   logic [64:0]  data_wdata;
@@ -136,19 +137,27 @@ module ibex_load_store_unit (
     unique case (data_type_ex_i) // Data type 00 Word, 01 Half word, 11,10 byte
       2'b00: begin // Writing a word
         if (!handle_misaligned_q) begin // first part of potentially misaligned transaction
-          unique case (data_addr[1:0])
-            2'b00:   data_be = 8'b1111;
-            2'b01:   data_be = 8'b1110;
-            2'b10:   data_be = 8'b1100;
-            2'b11:   data_be = 8'b1000;
+          unique case (data_addr[2:0])
+            3'b000:   data_be = 8'b0000_1111;
+            3'b001:   data_be = 8'b0001_1110;
+            3'b010:   data_be = 8'b0011_1100;
+            3'b011:   data_be = 8'b0111_1000;
+            3'b100:   data_be = 8'b1111_0000;
+            3'b101:   data_be = 8'b1110_0000;
+            3'b110:   data_be = 8'b1100_0000;
+            3'b111:   data_be = 8'b1000_0000;
             default: data_be = 'X;
           endcase // case (data_addr[1:0])
         end else begin // second part of misaligned transaction
-          unique case (data_addr[1:0])
-            2'b00:   data_be = 8'b0000; // this is not used, but included for completeness
-            2'b01:   data_be = 8'b0001;
-            2'b10:   data_be = 8'b0011;
-            2'b11:   data_be = 8'b0111;
+          unique case (data_addr[2:0])
+            3'b000:   data_be = 8'b0000_0000; // the next 5 cases are not used, but included for completeness
+            3'b001:   data_be = 8'b0000_0000;
+            3'b010:   data_be = 8'b0000_0000;
+            3'b011:   data_be = 8'b0000_0000;
+            3'b100:   data_be = 8'b0000_0000;
+            3'b101:   data_be = 8'b0000_0001;
+            3'b110:   data_be = 8'b0000_0011;
+            3'b111:   data_be = 8'b0000_0111;
             default: data_be = 'X;
           endcase // case (data_addr[1:0])
         end
@@ -156,40 +165,61 @@ module ibex_load_store_unit (
 
       2'b01: begin // Writing a half word
         if (!handle_misaligned_q) begin // first part of potentially misaligned transaction
-          unique case (data_addr[1:0])
-            2'b00:   data_be = 8'b0011;
-            2'b01:   data_be = 8'b0110;
-            2'b10:   data_be = 8'b1100;
-            2'b11:   data_be = 8'b1000;
+          unique case (data_addr[2:0])
+            3'b000:   data_be = 8'b0000_0011;
+            3'b001:   data_be = 8'b0000_0110;
+            3'b010:   data_be = 8'b0000_1100;
+            3'b011:   data_be = 8'b0001_1000;
+            3'b100:   data_be = 8'b0011_0000;
+            3'b101:   data_be = 8'b0110_0000;
+            3'b110:   data_be = 8'b1100_0000;
+            3'b111:   data_be = 8'b1000_0000;
             default: data_be = 'X;
           endcase // case (data_addr[1:0])
         end else begin // second part of misaligned transaction
-          data_be = 4'b0001;
+          data_be = 8'b0001;
         end
       end
 
       2'b10: begin // Writing a byte
-        unique case (data_addr[1:0])
-          2'b00:   data_be = 8'b0001;
-          2'b01:   data_be = 8'b0010;
-          2'b10:   data_be = 8'b0100;
-          2'b11:   data_be = 8'b1000;
+        unique case (data_addr[2:0])
+          3'b000:   data_be = 8'b0000_0001;
+          3'b001:   data_be = 8'b0000_0010;
+          3'b010:   data_be = 8'b0000_0100;
+          3'b011:   data_be = 8'b0000_1000;
+          3'b100:   data_be = 8'b0001_0000;
+          3'b101:   data_be = 8'b0010_0000;
+          3'b110:   data_be = 8'b0100_0000;
+          3'b111:   data_be = 8'b1000_0000;
           default: data_be = 'X;
         endcase // case (data_addr[1:0])
       end
 
       
       2'b11: begin // Writing a double
-        unique case (data_addr[2:0])
-          3'b000:  data_be = 8'b1111_1111;
-          3'b001:  data_be = 8'b1111_1110;
-          3'b010:  data_be = 8'b1111_1100;
-          3'b011:  data_be = 8'b1111_1000;
-          3'b100:  data_be = 8'b1111_0000;
-          3'b101:  data_be = 8'b1110_0000;
-          3'b110:  data_be = 8'b1100_0000;
-          3'b111:  data_be = 8'b1000_0000;
-        endcase
+        if (!handle_misaligned_q) begin // first part of misaligned txion
+          unique case (data_addr[2:0])
+            3'b000:  data_be = 8'b1111_1111;
+            3'b001:  data_be = 8'b1111_1110;
+            3'b010:  data_be = 8'b1111_1100;
+            3'b011:  data_be = 8'b1111_1000;
+            3'b100:  data_be = 8'b1111_0000;
+            3'b101:  data_be = 8'b1110_0000;
+            3'b110:  data_be = 8'b1100_0000;
+            3'b111:  data_be = 8'b1000_0000;
+          endcase
+        end else begin
+          unique case (data_addr[2:0])
+            3'b000:  data_be = 8'b0000_0000;
+            3'b001:  data_be = 8'b0000_0001;
+            3'b010:  data_be = 8'b0000_0011;
+            3'b011:  data_be = 8'b0000_0111;
+            3'b100:  data_be = 8'b0000_1111;
+            3'b101:  data_be = 8'b0001_1111;
+            3'b110:  data_be = 8'b0011_1111;
+            3'b111:  data_be = 8'b0111_1111;
+          endcase
+        end
       end
       
 
@@ -205,13 +235,17 @@ module ibex_load_store_unit (
   // we handle misaligned accesses, half word and byte accesses and
   // register offsets here
   assign wdata_offset_o = data_addr[2:0];
-  assign wdata_offset = data_addr[1:0] - data_reg_offset_ex_i[1:0];
+  assign wdata_offset = data_addr[2:0] - data_reg_offset_ex_i[1:0];
   always_comb begin
     unique case (wdata_offset)
-      2'b00:   data_wdata = {1'b0, data_wdata_ex_i[31:0]};
-      2'b01:   data_wdata = {1'b0, data_wdata_ex_i[23:0], data_wdata_ex_i[31:24]};
-      2'b10:   data_wdata = {1'b0, data_wdata_ex_i[15:0], data_wdata_ex_i[31:16]};
-      2'b11:   data_wdata = {1'b0, data_wdata_ex_i[ 7:0], data_wdata_ex_i[31: 8]};
+      3'b000:   data_wdata = {1'b0, data_wdata_ex_i[63:0]};
+      3'b001:   data_wdata = {1'b0, data_wdata_ex_i[55:0], data_wdata_ex_i[63:56]};
+      3'b010:   data_wdata = {1'b0, data_wdata_ex_i[47:0], data_wdata_ex_i[63:48]};
+      3'b011:   data_wdata = {1'b0, data_wdata_ex_i[39:0], data_wdata_ex_i[63:40]};
+      3'b100:   data_wdata = {1'b0, data_wdata_ex_i[31:0], data_wdata_ex_i[63:32]};
+      3'b101:   data_wdata = {1'b0, data_wdata_ex_i[23:0], data_wdata_ex_i[63:24]};
+      3'b110:   data_wdata = {1'b0, data_wdata_ex_i[15:0], data_wdata_ex_i[63:16]};
+      3'b111:   data_wdata = {1'b0, data_wdata_ex_i[ 7:0], data_wdata_ex_i[63: 8]};
       default: data_wdata = 'X;
     endcase // case (wdata_offset)
   end
@@ -229,7 +263,7 @@ module ibex_load_store_unit (
   end
 
   // update control signals for next read data upon receiving grant
-  assign rdata_offset_d  = data_gnt_i ? data_addr[1:0]     : rdata_offset_q;
+  assign rdata_offset_d  = data_gnt_i ? data_addr[2:0]     : rdata_offset_q;
   assign data_type_d     = data_gnt_i ? data_type_ex_i     : data_type_q;
   assign data_sign_ext_d = data_gnt_i ? data_sign_ext_ex_i : data_sign_ext_q;
   assign data_we_d       = data_gnt_i ? data_we_ex_i       : data_we_q;
@@ -238,7 +272,7 @@ module ibex_load_store_unit (
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
       rdata_q         <=   '0;
-      rdata_offset_q  <= 2'h0;
+      rdata_offset_q  <= 3'h0;
       data_type_q     <= 2'h0;
       data_sign_ext_q <= 1'b0;
       data_we_q       <= 1'b0;
@@ -254,10 +288,14 @@ module ibex_load_store_unit (
   // take care of misaligned words
   always_comb begin
     unique case (rdata_offset_q)
-      2'b00:   rdata_w_ext =  data_rdata_i[31:0];
-      2'b01:   rdata_w_ext = {data_rdata_i[ 7:0], rdata_q[31:8]};
-      2'b10:   rdata_w_ext = {data_rdata_i[15:0], rdata_q[31:16]};
-      2'b11:   rdata_w_ext = {data_rdata_i[23:0], rdata_q[31:24]};
+      3'b000:   rdata_w_ext = {1'b0, data_rdata_i[63:0]};
+      3'b001:   rdata_w_ext = {1'b0, data_rdata_i[ 7:0], data_rdata_i[63: 8]};
+      3'b010:   rdata_w_ext = {1'b0, data_rdata_i[15:0], data_rdata_i[63:16]};
+      3'b011:   rdata_w_ext = {1'b0, data_rdata_i[23:0], data_rdata_i[63:24]};
+      3'b100:   rdata_w_ext = {1'b0, data_rdata_i[31:0], data_rdata_i[63:32]};
+      3'b101:   rdata_w_ext = {1'b0, data_rdata_i[39:0], rdata_q[63:40]};
+      3'b110:   rdata_w_ext = {1'b0, data_rdata_i[47:0], rdata_q[63:48]};
+      3'b111:   rdata_w_ext = {1'b0, data_rdata_i[55:0], rdata_q[63:56]};
       default: rdata_w_ext = 'X;
     endcase
   end
@@ -266,38 +304,72 @@ module ibex_load_store_unit (
   // Sign extension //
   ////////////////////
 
+  // TODO ask:
+  //    how far do i sign-extend?
   // sign extension for half words
   always_comb begin
     unique case (rdata_offset_q)
-      2'b00: begin
+      3'b000: begin
         if (!data_sign_ext_q) begin
-          rdata_h_ext = {16'h0000, data_rdata_i[15:0]};
+          rdata_h_ext = {48'h0000, data_rdata_i[15:0]};
         end else begin
-          rdata_h_ext = {{16{data_rdata_i[15]}}, data_rdata_i[15:0]};
+          rdata_h_ext = {{48{data_rdata_i[15]}}, data_rdata_i[15:0]};
         end
       end
 
-      2'b01: begin
+      3'b001: begin
         if (!data_sign_ext_q) begin
-          rdata_h_ext = {16'h0000, data_rdata_i[23:8]};
+          rdata_h_ext = {48'h0000, data_rdata_i[23:8]};
         end else begin
-          rdata_h_ext = {{16{data_rdata_i[23]}}, data_rdata_i[23:8]};
+          rdata_h_ext = {{48{data_rdata_i[23]}}, data_rdata_i[23:8]};
         end
       end
 
-      2'b10: begin
+      3'b010: begin
         if (!data_sign_ext_q) begin
-          rdata_h_ext = {16'h0000, data_rdata_i[31:16]};
+          rdata_h_ext = {48'h0000, data_rdata_i[31:16]};
         end else begin
-          rdata_h_ext = {{16{data_rdata_i[31]}}, data_rdata_i[31:16]};
+          rdata_h_ext = {{48{data_rdata_i[31]}}, data_rdata_i[31:16]};
         end
       end
 
-      2'b11: begin
+      3'b011: begin
         if (!data_sign_ext_q) begin
-          rdata_h_ext = {16'h0000, data_rdata_i[7:0], rdata_q[31:24]};
+          rdata_h_ext = {48'h0000, data_rdata_i[39:24]};
         end else begin
-          rdata_h_ext = {{16{data_rdata_i[7]}}, data_rdata_i[7:0], rdata_q[31:24]};
+          rdata_h_ext = {{48{data_rdata_i[39]}}, data_rdata_i[39:24]};
+        end
+      end
+
+      3'b100: begin
+        if (!data_sign_ext_q) begin
+          rdata_h_ext = {48'h0000, data_rdata_i[47:32]};
+        end else begin
+          rdata_h_ext = {{48{data_rdata_i[47]}}, data_rdata_i[47:32]};
+        end
+      end
+
+      3'b101: begin
+        if (!data_sign_ext_q) begin
+          rdata_h_ext = {48'h0000, data_rdata_i[55:40]};
+        end else begin
+          rdata_h_ext = {{48{data_rdata_i[55]}}, data_rdata_i[55:40]};
+        end
+      end
+
+      3'b110: begin
+        if (!data_sign_ext_q) begin
+          rdata_h_ext = {48'h0000, data_rdata_i[63:48]};
+        end else begin
+          rdata_h_ext = {{48{data_rdata_i[63]}}, data_rdata_i[63:48]};
+        end
+      end
+
+      3'b111: begin
+        if (!data_sign_ext_q) begin
+          rdata_h_ext = {48'h0000, data_rdata_i[7:0], rdata_q[63:56]};
+        end else begin
+          rdata_h_ext = {{48{data_rdata_i[7]}}, data_rdata_i[7:0], rdata_q[63:56]};
         end
       end
 
@@ -308,35 +380,67 @@ module ibex_load_store_unit (
   // sign extension for bytes
   always_comb begin
     unique case (rdata_offset_q)
-      2'b00: begin
+      3'b000: begin
         if (!data_sign_ext_q) begin
-          rdata_b_ext = {24'h00_0000, data_rdata_i[7:0]};
+          rdata_b_ext = {56'h00_0000, data_rdata_i[7:0]};
         end else begin
-          rdata_b_ext = {{24{data_rdata_i[7]}}, data_rdata_i[7:0]};
+          rdata_b_ext = {{56{data_rdata_i[7]}}, data_rdata_i[7:0]};
         end
       end
 
-      2'b01: begin
+      3'b001: begin
         if (!data_sign_ext_q) begin
-          rdata_b_ext = {24'h00_0000, data_rdata_i[15:8]};
+          rdata_b_ext = {56'h00_0000, data_rdata_i[15:8]};
         end else begin
-          rdata_b_ext = {{24{data_rdata_i[15]}}, data_rdata_i[15:8]};
+          rdata_b_ext = {{56{data_rdata_i[15]}}, data_rdata_i[15:8]};
         end
       end
 
-      2'b10: begin
+      3'b010: begin
         if (!data_sign_ext_q) begin
-          rdata_b_ext = {24'h00_0000, data_rdata_i[23:16]};
+          rdata_b_ext = {56'h00_0000, data_rdata_i[23:16]};
         end else begin
-          rdata_b_ext = {{24{data_rdata_i[23]}}, data_rdata_i[23:16]};
+          rdata_b_ext = {{56{data_rdata_i[23]}}, data_rdata_i[23:16]};
         end
       end
 
-      2'b11: begin
+      3'b011: begin
         if (!data_sign_ext_q) begin
-          rdata_b_ext = {24'h00_0000, data_rdata_i[31:24]};
+          rdata_b_ext = {56'h00_0000, data_rdata_i[31:24]};
         end else begin
-          rdata_b_ext = {{24{data_rdata_i[31]}}, data_rdata_i[31:24]};
+          rdata_b_ext = {{56{data_rdata_i[31]}}, data_rdata_i[31:24]};
+        end
+      end
+
+      3'b100: begin
+        if (!data_sign_ext_q) begin
+          rdata_b_ext = {56'h00_0000, data_rdata_i[39:32]};
+        end else begin
+          rdata_b_ext = {{56{data_rdata_i[39]}}, data_rdata_i[39:32]};
+        end
+      end
+
+      3'b101: begin
+        if (!data_sign_ext_q) begin
+          rdata_b_ext = {56'h00_0000, data_rdata_i[47:40]};
+        end else begin
+          rdata_b_ext = {{56{data_rdata_i[47]}}, data_rdata_i[47:40]};
+        end
+      end
+
+      3'b110: begin
+        if (!data_sign_ext_q) begin
+          rdata_b_ext = {56'h00_0000, data_rdata_i[55:48]};
+        end else begin
+          rdata_b_ext = {{56{data_rdata_i[55]}}, data_rdata_i[55:48]};
+        end
+      end
+
+      3'b111: begin
+        if (!data_sign_ext_q) begin
+          rdata_b_ext = {56'h00_0000, data_rdata_i[63:56]};
+        end else begin
+          rdata_b_ext = {{56{data_rdata_i[63]}}, data_rdata_i[63:56]};
         end
       end
 
@@ -360,8 +464,9 @@ module ibex_load_store_unit (
 
   // check for misaligned accesses that need to be split into two word-aligned accesses
   assign split_misaligned_access =
-      ((data_type_ex_i == 2'b00) && (data_addr[1:0] != 2'b00)) || // misaligned word access
-      ((data_type_ex_i == 2'b01) && (data_addr[1:0] == 2'b11));   // misaligned half-word access
+      ((data_type_ex_i == 2'b00) && (data_addr[2:0] > 3'b100)) || // misaligned word access
+      ((data_type_ex_i == 2'b01) && (data_addr[2:0] == 3'b111)) || // misaligned half-word access
+      1'b0; // TODO implement misaligned double accesses here
 
   // FSM
   always_comb begin
@@ -489,13 +594,16 @@ module ibex_load_store_unit (
   assign data_rdata_ex_o = data_rdata_ext;
 
   // output data address must be word aligned
-  assign data_addr_w_aligned = {data_addr[31:2], 2'b00};
+  //assign data_addr_w_aligned = {data_addr[31:2], 2'b00};
+  assign data_addr_d_aligned = {data_addr[31:3], 3'b000};
 
   // output to data interface
-  assign data_addr_o   = data_addr_w_aligned;
+  //assign data_addr_o   = data_addr_w_aligned;
+  assign data_addr_o   = data_addr_d_aligned;
   // THIS SCREWS UP UNALIGNED ADDRESSES
   // original:
   //assign data_wdata_o  = data_wdata;
+  // TODO need to align double-size accesses as well
   assign data_wdata_o  = (data_type_ex_i == 2'b11) ? data_wdata_ex_i : data_wdata;
   assign data_we_o     = data_we_ex_i;
   assign data_be_o     = data_be;

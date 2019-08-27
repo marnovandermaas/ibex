@@ -42,8 +42,10 @@ module ibex_cheri_memchecker #(
 
     input logic [`CAP_SIZE-1:0] cap_base_i,
     // TODO decide if this should be an address or an offset from the capability
+    //  for now, decided on it being an offset from the base of the capability
     input logic [`INT_SIZE-1:0] address_i,
-    input logic [64:0] mem_data_i,
+    input logic [63:0] mem_data_i,
+    input logic        mem_tag_i,
     input logic [`CAP_SIZE-1:0] lsu_data_i,
     input logic [1:0] data_type_i,
     input logic write_i,
@@ -52,7 +54,8 @@ module ibex_cheri_memchecker #(
 
     input logic [2:0] offset,
 
-    output logic [64:0] mem_data_o,
+    output logic [63:0] mem_data_o,
+    output logic        mem_tag_o,
     output logic [`CAP_SIZE-1:0] lsu_data_o,
     output logic [7:0] data_be_o,
     output logic [`EXCEPTION_SIZE-1:0] cheri_mem_exc_o
@@ -90,20 +93,21 @@ module ibex_cheri_memchecker #(
     // TODO either set it to '0 here or use a setIsValidCap. using setIsValidCap means that if the capability
     // layout changes i only need to update dependencies
     lsu_data_o = access_capability_i ? (!(|address_i[2:0]) ? fromMem_o
-                                                         : {1'b0, fromMem_o[`CAP_SIZE-2:0]})
-                                   : mem_data_i;
+                                                           : {1'b0, fromMem_o[`CAP_SIZE-2:0]})
+                                     : {mem_tag_i, mem_data_i};
   end
 
   always_comb begin
     // TODO either set it to '0 here or use a setIsValidCap. using setIsValidCap means that if the capability
     // layout changes i only need to update dependencies
     toMem_i = {access_capability_i && !(|address_i[2:0]) ? lsu_data_i[`CAP_SIZE-1] : '0, lsu_data_i[`CAP_SIZE-2:0]};
-    mem_data_o = access_capability_i ? toMem_o : lsu_data_i;
+    mem_data_o = access_capability_i ? toMem_o[63:0] : lsu_data_i[63:0];
+    mem_tag_o = access_capability_i ? toMem_o[64] : lsu_data_i[64];
   end
 
 
 logic [`CAP_SIZE-1:0] fromMem_o;
-module_wrap64_fromMem module_fromMem (mem_data_i,
+module_wrap64_fromMem module_fromMem ({mem_tag_i, mem_data_i},
 			     fromMem_o);
 
 logic[`CAP_SIZE-1:0] toMem_i;

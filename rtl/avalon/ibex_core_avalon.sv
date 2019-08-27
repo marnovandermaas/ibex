@@ -34,9 +34,9 @@ module ibex_core_avalon #(
     output logic [31:0] avm_main_address,
     output logic [7:0]  avm_main_byteenable,
     output logic        avm_main_read,
-    input  logic [64:0] avm_main_readdata,
+    input  logic [63:0] avm_main_readdata,
     output logic        avm_main_write,
-    output logic [64:0] avm_main_writedata,
+    output logic [63:0] avm_main_writedata,
     input  logic        avm_main_waitrequest,
     input  logic        avm_main_readdatavalid,
     input  logic [1:0]  avm_main_response,
@@ -108,14 +108,28 @@ module ibex_core_avalon #(
     logic         data_rvalid_i;
     logic [7:0]   data_be_o;
     logic [31:0]  data_addr_o;
-    logic [64:0]  data_wdata_o;
-    logic [64:0]  data_rdata_i;
+    logic [63:0]  data_wdata_o;
+    logic   data_wtag_o;
+    logic [63:0]  data_rdata_i;
+    logic   data_rtag_i;
     logic         data_err_i;
     logic         data_we_o;
     logic         data_req_o;
     logic         data_gnt_i;
 
-    avalon_ibex_translator_main translator_main (
+  ibex_cheri_tag_mem #(
+      .TAG_MEM_SIZE(4096)
+  ) tag_mem (
+      .clk_i(clk_i),
+      .rst_ni(!rst_i),
+      .address_i(data_addr_o[31:3]),
+      .we_i(data_we_o),
+      // TODO parameterize this 64
+      .writedata_i(data_wtag_o),
+      .readdata_o(data_rtag_i)
+  );
+
+avalon_ibex_translator_main translator_main (
         .clock(clk_i),
         .reset_n(~rst_i),
 
@@ -124,9 +138,9 @@ module ibex_core_avalon #(
         .data_we_i(data_we_o),
         .data_be_i(data_be_o),
         // our main memory interface is word-addressed but the ibex core is byte-addressed
-        .data_addr_i({2'b0, data_addr_o[31:2]}),
+        .data_addr_i(data_addr_o),
         .data_wdata_i(data_wdata_o),
-        
+
         .avm_main_waitrequest(avm_main_waitrequest),
         .avm_main_readdatavalid(avm_main_readdatavalid),
         .avm_main_readdata(avm_main_readdata),
@@ -152,7 +166,7 @@ module ibex_core_avalon #(
         // inputs to translator
         .instr_req_i(instr_req_o),
         // our memory is word-addressed but the ibex core is byte-addressed
-        .instr_addr_i({2'b0, instr_addr_o[31:2]}),
+        .instr_addr_i(instr_addr_o),
 
         .avm_instr_readdata(avm_instr_readdata),
         .avm_instr_waitrequest(avm_instr_waitrequest),
@@ -201,7 +215,9 @@ module ibex_core_avalon #(
         .data_be_o      (data_be_o),
         .data_addr_o    (data_addr_o),
         .data_wdata_o   (data_wdata_o),
+        .data_wtag_o   (data_wtag_o),
         .data_rdata_i   (data_rdata_i),
+        .data_rtag_i   (data_rtag_i),
         .data_err_i     (data_err_i),
         .data_we_o      (data_we_o),
         .data_req_o     (data_req_o),

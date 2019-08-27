@@ -82,8 +82,10 @@ module ibex_core #(
     output logic        data_we_o,
     output logic [7:0]  data_be_o,
     output logic [31:0] data_addr_o,
-    output logic [64:0] data_wdata_o,
-    input  logic [64:0] data_rdata_i,
+    output logic [63:0] data_wdata_o,
+    output logic        data_wtag_o,
+    input  logic [63:0] data_rdata_i,
+    input  logic        data_rtag_i,
     input  logic        data_err_i,
 
     // Interrupt inputs
@@ -771,12 +773,14 @@ module ibex_core #(
       .write_i(data_we_o),
       .access_capability_i(mem_cap_access),
       .mem_data_i(data_rdata_i),
+      .mem_tag_i(data_rtag_i),
       .lsu_data_i(data_wdata),
       .data_be_i(data_be),
       .offset(lsu_offset),
 
       .data_be_o(data_be_o),
       .mem_data_o(data_wdata_o),
+      .mem_tag_o(data_wtag_o),
       .lsu_data_o(data_rdata),
       .cheri_mem_exc_o(cheri_data_exc)
   );
@@ -801,9 +805,11 @@ module ibex_core #(
       // likewise, we never read capabilities from the instruction stream
       .access_capability_i('0),
       .mem_data_i(),
+      .mem_tag_i(),
       .lsu_data_i(),
 
       .mem_data_o(),
+      .mem_tag_o(),
       .lsu_data_o(),
       .cheri_mem_exc_o(cheri_instr_exc)
   );

@@ -12,6 +12,7 @@
 #include "socket_packet_utils.h"
 #include <stdlib.h>
 
+#define MEM_BASE_BYTES 0x80000000
 #define MEM_BASE_WORDS 0x20000000
 #define MEM_SIZE_BYTES 0x2000000
 #define MEM_SIZE_WORDS 0x2000000/4
@@ -103,14 +104,10 @@ int main(int argc, char** argv, char** env) {
     trace_obj.open("vlt_d.vcd");
     #endif
 
-    // initialise memory and tags
+    // initialise memory
     uint8_t *memory = (uint8_t *) malloc(MEM_SIZE_BYTES);
     if (memory == NULL) {
         std::cout << "memory is null" << std::endl;
-    }
-    bool *tags = (bool *) malloc(MEM_SIZE_BYTES/8);
-    if (tags == NULL) {
-        std::cout << "tags is null" << std::endl;
     }
 
     // initialize the socket with the input parameters
@@ -268,10 +265,6 @@ int main(int argc, char** argv, char** env) {
                         memory[i] = 0;
                     }
 
-                    for (int i = 0; i < (MEM_SIZE_BYTES/8); i++) {
-                        tags[i] = 0;
-                    }
-
                     in_count++;
                 }
             }
@@ -296,14 +289,13 @@ int main(int argc, char** argv, char** env) {
                 // TestRIG specifies that byte addresses must be between 0x80000000 and 0x80008000
                 // our avalon wrapper divides the byte address by 4 in order to get a word address
                 // so we need to check for addresses between 0x20003fff and 0x20000000
-                if (address >= (MEM_BASE_WORDS + MEM_SIZE_WORDS) || address < MEM_BASE_WORDS) {
+                if (address >= (MEM_BASE_BYTES + MEM_SIZE_BYTES) || address < MEM_BASE_BYTES) {
                     // the core tried to read from an address outside the specified range
                     // set the signals appropriately
                     top->avm_main_response = 0b11;
                     // TODO comment this
-                    top->avm_main_readdata[0] = 0xdeadbeef & belu[top->avm_main_byteenable & 0xf];
-                    top->avm_main_readdata[1] = 0xdeadbeef & belu[(top->avm_main_byteenable) >> 4];
-                    top->avm_main_readdata[2] = 0;
+                    // TODO this belu is no longer accurate
+                    top->avm_main_readdata = 0xdeadbeefdeadbeef & belu[top->avm_main_byteenable & 0xf];
                     top->avm_main_readdatavalid = 1;
                     std::cout << "out of bounds memory access - address: 0x" << std::hex << address << std::endl;
                 } else {
@@ -312,10 +304,7 @@ int main(int argc, char** argv, char** env) {
 
                     // translate the address so it is between 0x0 and 0x00003fff
                     // TODO change this to a #defined value
-                    address = address & 0x007fffff;
-
-                    // convert the address to a byte address
-                    address <<= 2;
+                    address = address & 0x01ffffff;
 
                     // we want to start with the highest byte address for this word since our
                     // memory is little endian
@@ -323,21 +312,16 @@ int main(int argc, char** argv, char** env) {
 
                     // for each bit in the byteenable, check if we should get that byte from memory
                     // if not, set it to 0
-                    unsigned int data[3] = {0};
+                    unsigned long long data = 0;
                     // TODO clean this up into a for loop
                     const int BPW = 7;
                     for (int i = 0; i <= BPW; i++) {
-                        data[(BPW - i)/4] <<= 8;
-                        data[(BPW - i)/4] |= ((top->avm_main_byteenable>>(BPW-i)) & 0x1) ? memory[address-i] : 0;
+                        data <<= 8;
+                        data |= ((top->avm_main_byteenable>>(BPW-i)) & 0x1) ? memory[address-i] : 0;
                     }
 
-                    // set the tag
-                    data[2] = tags[address/8];
-
                     // set the signals appropriately
-                    top->avm_main_readdata[0] = data[0];
-                    top->avm_main_readdata[1] = data[1];
-                    top->avm_main_readdata[2] = data[2];
+                    top->avm_main_readdata = data;
                     top->avm_main_readdatavalid = 1;
                     top->avm_main_response = 0b00;
                 }
@@ -352,7 +336,7 @@ int main(int argc, char** argv, char** env) {
                 // TestRIG specifies that byte addresses must be between 0x80000000 and 0x80008000
                 // our avalon wrapper divides the byte address by 4 in order to get a word address
                 // so we need to check for addresses between 0x20003fff and 0x20000000
-                if (address > (MEM_BASE_WORDS + MEM_SIZE_WORDS) || address < MEM_BASE_WORDS) {
+                if (address >= (MEM_BASE_BYTES + MEM_SIZE_BYTES) || address < MEM_BASE_BYTES) {
                     // the core tried to write to an address outside the specified range
                     // set the signals appropriately
                     top->avm_main_response = 0b11;
@@ -362,27 +346,17 @@ int main(int argc, char** argv, char** env) {
                     // the core tried to read from an address within the specified range
 
                     // translate the address so it is between 0x0 and 0x00003fff
-                    address = address & 0x007fffff;
+                    address = address & 0x01ffffff;
 
                     // get the data from the core
-                    unsigned int data[3] = {0};
-                    data[0] = top->avm_main_writedata[0];
-                    data[1] = top->avm_main_writedata[1];
-                    data[2] = top->avm_main_writedata[2];
-
-
-                    // convert the address to a byte address
-                    address<<=2;
-
-                    // set the tag
-                    tags[address/8] = data[2];
+                    uint64_t data = top->avm_main_writedata;
 
                     // we want to only change the memory values for which byteenable is high
                     // if byteenable is low, preserve that byte in memory
                     const int BPW = 8;
                     for (int i = 0; i < BPW; i++) {
-                        memory[address + i] = (top->avm_main_byteenable>>i & 0x1) ? data[i/4] : memory[address + i];
-                        data[i/4] >>= 8;
+                        memory[address + i] = (top->avm_main_byteenable>>i & 0x1) ? data : memory[address + i];
+                        data >>= 8;
                     }
 
                     // set output signals appropriately
@@ -474,15 +448,15 @@ RVFI_DII_Execution_Packet readRVFI(Vibex_core_avalon *top, bool signExtend) {
 
     RVFI_DII_Execution_Packet execpacket = {
         .rvfi_order = top->rvfi_order,
-        .rvfi_pc_rdata = top->rvfi_pc_rdata | ((top->rvfi_pc_rdata & 0x80000000) ? signExtension : 0),
-        .rvfi_pc_wdata = top->rvfi_pc_wdata | ((top->rvfi_pc_wdata & 0x80000000) ? signExtension : 0),
-        .rvfi_insn = top->rvfi_insn | ((top->rvfi_insn & 0x80000000) ? signExtension : 0 ),
-        .rvfi_rs1_data = top->rvfi_rs1_rdata | ((top->rvfi_rs1_rdata & 0x80000000) ? signExtension : 0 ),
-        .rvfi_rs2_data = top->rvfi_rs2_rdata | ((top->rvfi_rs2_rdata & 0x80000000) ? signExtension : 0 ),
-        .rvfi_rd_wdata = top->rvfi_rd_wdata | ((top->rvfi_rd_wdata & 0x80000000) ? signExtension : 0 ),
-        .rvfi_mem_addr = top->rvfi_mem_addr | ((top->rvfi_mem_addr & 0x80000000) ? signExtension : 0 ),
-        .rvfi_mem_rdata = top->rvfi_mem_rdata | ((top->rvfi_mem_rdata & 0x80000000) ? signExtension : 0 ),
-        .rvfi_mem_wdata = top->rvfi_mem_wdata | ((top->rvfi_mem_wdata & 0x80000000) ? signExtension : 0 ),
+        .rvfi_pc_rdata = top->rvfi_pc_rdata     | ((top->rvfi_pc_rdata & 0x80000000) ? signExtension : 0),
+        .rvfi_pc_wdata = top->rvfi_pc_wdata     | ((top->rvfi_pc_wdata & 0x80000000) ? signExtension : 0),
+        .rvfi_insn = top->rvfi_insn             | ((top->rvfi_insn & 0x80000000) ? signExtension : 0 ),
+        .rvfi_rs1_data = top->rvfi_rs1_rdata    | ((top->rvfi_rs1_rdata & 0x80000000) ? signExtension : 0 ),
+        .rvfi_rs2_data = top->rvfi_rs2_rdata    | ((top->rvfi_rs2_rdata & 0x80000000) ? signExtension : 0 ),
+        .rvfi_rd_wdata = top->rvfi_rd_wdata     | ((top->rvfi_rd_wdata & 0x80000000) ? signExtension : 0 ),
+        .rvfi_mem_addr = top->rvfi_mem_addr     | ((top->rvfi_mem_addr & 0x80000000) ? signExtension : 0 ),
+        .rvfi_mem_rdata = top->rvfi_mem_rdata   | ((top->rvfi_mem_rdata & 0x80000000) ? signExtension : 0 ),
+        .rvfi_mem_wdata = top->rvfi_mem_wdata   | ((top->rvfi_mem_wdata & 0x80000000) ? signExtension : 0 ),
         .rvfi_mem_rmask = top->rvfi_mem_rmask,
         .rvfi_mem_wmask = top->rvfi_mem_wmask,
         .rvfi_rs1_addr = top->rvfi_rs1_addr,
