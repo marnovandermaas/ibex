@@ -83,8 +83,6 @@ module ibex_decoder #(
     output logic                     cheri_en_o,
     output ibex_defines::cheri_base_opcode_e       cheri_base_opcode_o,
     output ibex_defines::cheri_threeop_funct7_e    cheri_threeop_opcode_o,
-    output ibex_defines::cheri_store_funct5_e      cheri_store_opcode_o,
-    output ibex_defines::cheri_load_funct5_e       cheri_load_opcode_o,
     output ibex_defines::cheri_s_a_d_funct5_e      cheri_sad_opcode_o,
     output ibex_defines::c_op_a_sel_e          cheri_op_a_mux_sel_o,
     output ibex_defines::c_op_b_sel_e          cheri_op_b_mux_sel_o,
@@ -137,15 +135,11 @@ module ibex_decoder #(
 
   cheri_base_opcode_e cheri_base_opcode;
   cheri_threeop_funct7_e cheri_threeop_opcode;
-  cheri_store_funct5_e cheri_store_opcode;
-  cheri_load_funct5_e cheri_load_opcode;
   cheri_s_a_d_funct5_e cheri_sad_opcode;
 
 
   assign cheri_base_opcode = cheri_base_opcode_e'(instr[14:12]);
   assign cheri_threeop_opcode = cheri_threeop_funct7_e'(instr[31:25]);
-  assign cheri_store_opcode = cheri_store_funct5_e'(instr[11:7]);
-  assign cheri_load_opcode = cheri_load_funct5_e'(instr[24:20]);
   assign cheri_sad_opcode = cheri_s_a_d_funct5_e'(instr[24:20]);
 
 
@@ -238,8 +232,6 @@ module ibex_decoder #(
     cheri_b_en_o = 1'b0;
     cheri_base_opcode_o = cheri_base_opcode;
     cheri_threeop_opcode_o = cheri_threeop_opcode;
-    cheri_store_opcode_o = cheri_store_opcode;
-    cheri_load_opcode_o = cheri_load_opcode;
     cheri_sad_opcode_o = cheri_sad_opcode;
     use_cap_base_o = 1'b0;
 
@@ -868,7 +860,7 @@ module ibex_decoder #(
                   end
 
                 C_GET_PERM, C_GET_TYPE, C_GET_BASE, C_GET_LEN, C_GET_TAG, C_GET_SEALED, C_GET_OFFSET,
-                C_GET_FLAGS, C_MOVE, C_CLEAR_TAG, CLEAR, C_GET_ADDR, C_FP_CLEAR: begin
+                C_GET_FLAGS, C_MOVE, C_CLEAR_TAG, CLEAR, C_GET_ADDR: begin
                     // these don't need any extra work in here
                     illegal_insn = 1'b0;
                 end

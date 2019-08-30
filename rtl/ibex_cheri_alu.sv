@@ -100,8 +100,6 @@ parameter EXCEPTION_SIZE = 22;
 module ibex_cheri_alu (
   input ibex_defines::cheri_base_opcode_e             base_opcode_i,
   input ibex_defines::cheri_threeop_funct7_e          threeop_opcode_i,
-  input ibex_defines::cheri_store_funct5_e            store_opcode_i,
-  input ibex_defines::cheri_load_funct5_e             load_opcode_i,
   input ibex_defines::cheri_s_a_d_funct5_e  sad_opcode_i,
 
   input logic [`CAP_SIZE-1:0] operand_a_i,
@@ -111,7 +109,7 @@ module ibex_cheri_alu (
   output logic [`INTEGER_SIZE-1:0] alu_operand_b_o,
   output ibex_defines::alu_op_e alu_operator_o,
 
-  input logic [31:0] alu_result_i,
+  input logic [32:0] alu_result_i,
 
   output logic [`CAP_SIZE-1:0] returnvalue_o,
   output logic wroteCapability,
@@ -127,38 +125,115 @@ module ibex_cheri_alu (
   logic [`EXCEPTION_SIZE-1:0] exceptions_a;
   logic [`EXCEPTION_SIZE-1:0] exceptions_b;
 
+
+// function input and output declarations
+// these are inputs and outputs for modules that were generated from bluespec code
+// see https://github.com/CTSRD-CHERI/cheri-cap-lib for the bluespec code
+// This is being used because the spec for cheri capability compression is still being worked on
+// so it is possible the internals of the functions might change
+// naming: O_FFF...FFF_D
+// where O is the operand being worked on (operand a or b)
+//       F is the function being used
+//       D is the direction of the connection - _i means it is an input to the function
+//                                              _o means it is an output from the function
+
+logic [`INTEGER_SIZE-1:0] a_setBounds_i;
+logic [`CAP_SIZE:0] a_setBounds_o;
+
+logic [`INTEGER_SIZE-1:0] a_getAddr_o;
+
+logic [`INTEGER_SIZE-1:0] b_getAddr_o;
+
+logic [`INTEGER_SIZE:0] a_getTop_o;
+
+logic [`INTEGER_SIZE:0] b_getTop_o;
+
+logic [`OTYPE_SIZE-1:0] a_setType_i;
+logic [`CAP_SIZE:0] a_setType_o;
+
+logic [`OTYPE_SIZE-1:0] b_setType_i;
+logic [`CAP_SIZE:0] b_setType_o;
+
+logic [`PERMS_SIZE-1:0] a_getPerms_o;
+
+logic [`PERMS_SIZE-1:0] b_getPerms_o;
+
+logic [`PERMS_SIZE-1:0] a_setPerms_i;
+logic [`CAP_SIZE-1:0] a_setPerms_o;
+
+logic [`PERMS_SIZE-1:0] b_setPerms_i;
+logic [`CAP_SIZE-1:0] b_setPerms_o;
+
+logic a_setFlags_i;
+logic [`CAP_SIZE-1:0] a_setFlags_o;
+
+logic [`INTEGER_SIZE-1:0] a_setOffset_i;
+logic [`CAP_SIZE:0] a_setOffset_o;
+
+logic [`INTEGER_SIZE-1:0] a_getBase_o;
+
+logic [`INTEGER_SIZE-1:0] b_getBase_o;
+
+logic [`INTEGER_SIZE-1:0] a_getOffset_o;
+
+logic [`INTEGER_SIZE-1:0] b_getOffset_o;
+
+logic a_isValidCap_o;
+
+logic b_isValidCap_o;
+
+logic a_isSealed_o;
+
+logic b_isSealed_o;
+
+logic [`OTYPE_SIZE-1:0] a_getType_o;
+
+logic [`OTYPE_SIZE-1:0] b_getType_o;
+
+logic [`INTEGER_SIZE:0] a_getLength_o;
+
+logic a_getFlags_o;
+
+logic a_setValidCap_i;
+logic [`CAP_SIZE-1:0] a_setValidCap_o;
+
+logic b_setValidCap_i;
+logic [`CAP_SIZE-1:0] b_setValidCap_o;
+
+logic [`INTEGER_SIZE-1:0] a_setAddr_i;
+logic [`CAP_SIZE:0] a_setAddr_o;
+
+logic [`INTEGER_SIZE-1:0] b_setAddr_i;
+logic [`CAP_SIZE:0] b_setAddr_o;
+
+
+
+  // operations
   always_comb begin
     exceptions_a_o = '0;
     exceptions_b_o = '0;
 
+    alu_operand_a_o = '0;
+    alu_operand_b_o = '0;
+    alu_operator_o = ALU_ADD;
+    returnvalue_o = '0;
+    wroteCapability = '0;
 
-  alu_operand_a_o = '0;
-  alu_operand_b_o = '0;
-  alu_operator_o = ALU_ADD;
-  returnvalue_o = '0;
-  wroteCapability = '0;
-
-
-a_setBounds_i = '0;
-a_setType_i = '0;
-b_setType_i = '0;
-a_setPerms_i = '0;
-b_setPerms_i = '0;
-a_setFlags_i = '0;
-a_setOffset_i = '0;
-a_setValidCap_i = '0;
-b_setValidCap_i = '0;
-a_setAddr_i = '0;
-b_setAddr_i = '0;
-
-
-
-
+    a_setBounds_i = '0;
+    a_setType_i = '0;
+    b_setType_i = '0;
+    a_setPerms_i = '0;
+    b_setPerms_i = '0;
+    a_setFlags_i = '0;
+    a_setOffset_i = '0;
+    a_setValidCap_i = '0;
+    b_setValidCap_i = '0;
+    a_setAddr_i = '0;
+    b_setAddr_i = '0;
 
     case (base_opcode_i)
       THREE_OP: begin
         case (threeop_opcode_i)
-          // TODO implement later
           C_SPECIAL_RW: begin
             // operand b is the register id
             // operand a is the data that is (maybe) going to be written to the register
@@ -170,8 +245,6 @@ b_setAddr_i = '0;
           end
 
           C_SET_BOUNDS: begin
-            // TODO: can't use the alu adder here since we need more bits for the result (we care
-            // about the carry)
             a_setBounds_i = operand_b_i;
             returnvalue_o = a_setBounds_o[`CAP_SIZE-1:0];
             wroteCapability = 1'b1;
@@ -183,7 +256,7 @@ b_setAddr_i = '0;
             exceptions_a_o =   exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
                             |  exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
                             |  exceptions_a[LENGTH_VIOLATION] << LENGTH_VIOLATION
-                            |  ((a_getAddr_o + operand_b_i > a_getTop_o) << LENGTH_VIOLATION);
+                            |  ((alu_result_i > a_getTop_o) << LENGTH_VIOLATION);
             //$display("csetbounds output: %h   exceptions: %h", returnvalue_o, exceptions_a_o);
           end
 
@@ -201,7 +274,7 @@ b_setAddr_i = '0;
                                  | exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
                                  | exceptions_a[LENGTH_VIOLATION] << LENGTH_VIOLATION
                                 )
-                              | ((a_getAddr_o + operand_b_i > a_getTop_o) << LENGTH_VIOLATION)
+                              | ((alu_result_i > a_getTop_o) << LENGTH_VIOLATION)
                               | ((!a_setBounds_o[`CAP_SIZE] << INEXACT_BOUNDS_VIOLATION));
             //$display("csetboundse output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
@@ -269,7 +342,7 @@ b_setAddr_i = '0;
             alu_operator_o = ALU_ADD;
 
             returnvalue_o = a_setOffset_o[`CAP_SIZE] ? a_setOffset_o[`CAP_SIZE-1:0] :
-                                                       a_getBase_o + operand_b_i;
+                                                       alu_result_i;
             wroteCapability = a_setOffset_o[`CAP_SIZE];
 
             exceptions_a_o = exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION;
@@ -289,12 +362,12 @@ b_setAddr_i = '0;
           C_INC_OFFSET: begin
             // TODO remove adders here?
             a_setOffset_i = a_getOffset_o + operand_b_i;
-            alu_operand_a_o = a_getBase_o;
+            alu_operand_a_o = a_getAddr_o;
             alu_operand_b_o = operand_b_i;
             alu_operator_o = ALU_ADD;
 
             returnvalue_o = a_setOffset_o[`CAP_SIZE] ? a_setOffset_o[`CAP_SIZE-1:0] :
-                                                      a_getAddr_o + operand_b_i;
+                                                       alu_result_i;
             wroteCapability = a_setOffset_o[`CAP_SIZE];
 
             exceptions_a_o = exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION;
@@ -321,7 +394,7 @@ b_setAddr_i = '0;
 
             returnvalue_o = operand_b_i == '0        ? operand_b_i :
                             a_setOffset_o[`CAP_SIZE] ? a_setOffset_o[`CAP_SIZE-1:0] :
-                                                       a_getBase_o + operand_b_i;
+                                                       alu_result_i;
 
             wroteCapability = operand_b_i == '0        ? 1'b0 :
                               a_setOffset_o[`CAP_SIZE] ? 1'b1 :
@@ -404,7 +477,6 @@ b_setAddr_i = '0;
             wroteCapability = 1'b1;
 
 
-            // TODO deal with exceptions
             exceptions_a_o = exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
                             |((exceptions_a[SEAL_VIOLATION] && !(!b_isValidCap_o || b_getAddr_o == {`INTEGER_SIZE{1'b1}}))
                                << SEAL_VIOLATION);
@@ -441,6 +513,7 @@ b_setAddr_i = '0;
             // TODO
           end
 
+          // TODO implement CCALLFAST instead of regular CCALL
           CCALL: begin
             // when trying to read this using the spec, cs is my operand_a and cb is my operand_b
             // in general in the rest of this file this is the other way around, with cb being operand_a
@@ -522,12 +595,7 @@ b_setAddr_i = '0;
             //$display("ccleartag output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
               end
 
-              // TODO implement later
-              // TODO implement the rest of this instruction in the ID stage
               C_JALR: begin
-                // TODO this next comment is now obsolete
-                // in this instruction, cb is operand_b since we're actually passing pcc as the first operand
-
                 // current implementation of JAL and JALR:
                 // ibex takes 2 cycles to do a normal JAL and JALR, so this one can also take 2 cycles
                 // in the first cycle, ibex calculates the jump target and sends it to the IF stage
@@ -541,8 +609,6 @@ b_setAddr_i = '0;
                 // issue is this isn't a very clean way of doing this - we need to fake incoffsetimm instruction
                 // in the decoder. However, ibex already does it this way.
 
-                b_setAddr_i = {a_getAddr_o[`INTEGER_SIZE-1:1], 1'b0};
-                //returnvalue_o = b_setAddr_o[`CAP_SIZE-1:0];
                 returnvalue_o = operand_a_i;
                 wroteCapability = 1'b1;
 
@@ -554,7 +620,7 @@ b_setAddr_i = '0;
                                 |exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
                                 |exceptions_a[PERMIT_EXECUTE_VIOLATION] << PERMIT_EXECUTE_VIOLATION
                                 |exceptions_a[LENGTH_VIOLATION] << LENGTH_VIOLATION
-                                |((a_getAddr_o + `MIN_INSTR_BYTES > a_getTop_o) << LENGTH_VIOLATION);
+                                |((alu_result_i > a_getTop_o) << LENGTH_VIOLATION);
                                 // we don't care about trying to throw the last exception since we do support
                                 // compressed instructions
 
@@ -571,11 +637,6 @@ b_setAddr_i = '0;
                 returnvalue_o = a_getAddr_o;
                 wroteCapability = 1'b0;
             ////$display("cgetaddr output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
-              end
-
-              // TODO ask:this instruction doesn't make sense on ibex - what exception to call?
-              C_FP_CLEAR: begin
-
               end
 
               default: begin
@@ -615,7 +676,8 @@ b_setAddr_i = '0;
         exceptions_a_o = exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
                         |exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
                         |exceptions_a[LENGTH_VIOLATION] << LENGTH_VIOLATION
-                        |((a_getAddr_o + operand_b_i[`IMM_SIZE-1:0] > a_getTop_o) << LENGTH_VIOLATION);
+                        //|((a_getAddr_o + operand_b_i[`IMM_SIZE-1:0] > a_getTop_o) << LENGTH_VIOLATION);
+                        |((alu_result_i > a_getTop_o) << LENGTH_VIOLATION);
             //$display("csetboundsimm output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
       end
 
@@ -633,178 +695,137 @@ b_setAddr_i = '0;
 
 
 
-// TODO need to make all of these the correct size
-// TODO need to initialize these all to 0
+// TODO rename/rearrange all of these
 
-logic [`INTEGER_SIZE-1:0] a_setBounds_i;
-logic [`CAP_SIZE:0] a_setBounds_o;
 module_wrap64_setBounds module_wrap64_setBounds_a (
-    .wrap64_setBounds_cap(operand_a_i),
-    .wrap64_setBounds_length(a_setBounds_i),
-    .wrap64_setBounds(a_setBounds_o));
+    .wrap64_setBounds_cap     (operand_a_i),
+    .wrap64_setBounds_length  (a_setBounds_i),
+    .wrap64_setBounds         (a_setBounds_o));
 
 
-logic [`INTEGER_SIZE-1:0] a_getAddr_o;
 module_wrap64_getAddr module_getAddr_a (
-    .wrap64_getAddr_cap(operand_a_i),
-    .wrap64_getAddr(a_getAddr_o));
+    .wrap64_getAddr_cap (operand_a_i),
+    .wrap64_getAddr     (a_getAddr_o));
 
-logic [`INTEGER_SIZE-1:0] b_getAddr_o;
 module_wrap64_getAddr module_getAddr_b (
-    .wrap64_getAddr_cap(operand_b_i),
-    .wrap64_getAddr(b_getAddr_o));
+    .wrap64_getAddr_cap (operand_b_i),
+    .wrap64_getAddr     (b_getAddr_o));
 
-logic [`INTEGER_SIZE:0] a_getTop_o;
 module_wrap64_getTop module_wrap64_getTop_a (
-  .wrap64_getTop_cap(operand_a_i),
-    .wrap64_getTop(a_getTop_o));
+  .wrap64_getTop_cap    (operand_a_i),
+    .wrap64_getTop      (a_getTop_o));
 
-logic [`INTEGER_SIZE:0] b_getTop_o;
 module_wrap64_getTop module_wrap64_getTop_b (
-  .wrap64_getTop_cap(operand_b_i),
-    .wrap64_getTop(b_getTop_o));
+  .wrap64_getTop_cap    (operand_b_i),
+    .wrap64_getTop      (b_getTop_o));
 
-logic [`OTYPE_SIZE-1:0] a_setType_i;
-logic [`CAP_SIZE:0] a_setType_o;
 module_wrap64_setType module_wrap64_setType_a (
-  .wrap64_setType_cap(operand_a_i),
-    .wrap64_setType_otype(a_setType_i),
-    .wrap64_setType(a_setType_o));
+  .wrap64_setType_cap     (operand_a_i),
+    .wrap64_setType_otype (a_setType_i),
+    .wrap64_setType       (a_setType_o));
 
-logic [`OTYPE_SIZE-1:0] b_setType_i;
-logic [`CAP_SIZE:0] b_setType_o;
 module_wrap64_setType module_wrap64_setType_b (
-  .wrap64_setType_cap(operand_b_i),
-    .wrap64_setType_otype(b_setType_i),
-    .wrap64_setType(b_setType_o));
+  .wrap64_setType_cap     (operand_b_i),
+    .wrap64_setType_otype (b_setType_i),
+    .wrap64_setType       (b_setType_o));
 
-logic [`PERMS_SIZE-1:0] a_getPerms_o;
 module_wrap64_getPerms module_wrap64_getPerms_a (
-  .wrap64_getPerms_cap(operand_a_i),
-    .wrap64_getPerms(a_getPerms_o));
+  .wrap64_getPerms_cap    (operand_a_i),
+    .wrap64_getPerms      (a_getPerms_o));
 
-logic [`PERMS_SIZE-1:0] b_getPerms_o;
 module_wrap64_getPerms module_wrap64_getPerms_b (
-  .wrap64_getPerms_cap(operand_b_i),
-    .wrap64_getPerms(b_getPerms_o));
+  .wrap64_getPerms_cap    (operand_b_i),
+    .wrap64_getPerms      (b_getPerms_o));
 
 
-logic [`PERMS_SIZE-1:0] a_setPerms_i;
-logic [`CAP_SIZE-1:0] a_setPerms_o;
 module_wrap64_setPerms module_wrap64_setPerms_a (
-  .wrap64_setPerms_cap(operand_a_i),
-    .wrap64_setPerms_perms(a_setPerms_i),
-    .wrap64_setPerms(a_setPerms_o));
+  .wrap64_setPerms_cap      (operand_a_i),
+    .wrap64_setPerms_perms  (a_setPerms_i),
+    .wrap64_setPerms        (a_setPerms_o));
 
 
-logic [`PERMS_SIZE-1:0] b_setPerms_i;
-logic [`CAP_SIZE-1:0] b_setPerms_o;
 module_wrap64_setPerms module_wrap64_setPerms_b (
-  .wrap64_setPerms_cap(operand_b_i),
-    .wrap64_setPerms_perms(b_setPerms_i),
-    .wrap64_setPerms(b_setPerms_o));
+  .wrap64_setPerms_cap      (operand_b_i),
+    .wrap64_setPerms_perms  (b_setPerms_i),
+    .wrap64_setPerms        (b_setPerms_o));
 
-logic a_setFlags_i;
-logic [`CAP_SIZE-1:0] a_setFlags_o;
 module_wrap64_setFlags module_wrap64_setFlags_a (
-  .wrap64_setFlags_cap(operand_a_i),
-    .wrap64_setFlags_flags(a_setFlags_i),
-    .wrap64_setFlags(a_setFlags_o));
+  .wrap64_setFlags_cap      (operand_a_i),
+    .wrap64_setFlags_flags  (a_setFlags_i),
+    .wrap64_setFlags        (a_setFlags_o));
 
-logic [`INTEGER_SIZE-1:0] a_setOffset_i;
-logic [`CAP_SIZE:0] a_setOffset_o;
 module_wrap64_setOffset module_wrap64_setOffset_a (
-  .wrap64_setOffset_cap(operand_a_i),
+  .wrap64_setOffset_cap     (operand_a_i),
     .wrap64_setOffset_offset(a_setOffset_i),
-    .wrap64_setOffset(a_setOffset_o));
+    .wrap64_setOffset       (a_setOffset_o));
 
-logic [`CAP_SIZE-1:0] a_getBase_o;
 module_wrap64_getBase module_getBase_a (
-    .wrap64_getBase_cap(operand_a_i),
-    .wrap64_getBase(a_getBase_o));
+    .wrap64_getBase_cap     (operand_a_i),
+    .wrap64_getBase         (a_getBase_o));
 
-logic [`CAP_SIZE-1:0] b_getBase_o;
 module_wrap64_getBase module_getBase_b (
-    .wrap64_getBase_cap(operand_b_i),
-    .wrap64_getBase(b_getBase_o));
+    .wrap64_getBase_cap     (operand_b_i),
+    .wrap64_getBase         (b_getBase_o));
 
-logic [`CAP_SIZE-1:0] a_getOffset_o;
 module_wrap64_getOffset module_getOffset_a (
-  .wrap64_getOffset_cap(operand_a_i),
-    .wrap64_getOffset(a_getOffset_o));
+  .wrap64_getOffset_cap     (operand_a_i),
+    .wrap64_getOffset       (a_getOffset_o));
 
-logic [`CAP_SIZE-1:0] b_getOffset_o;
 module_wrap64_getOffset module_getOffset_b (
-  .wrap64_getOffset_cap(operand_b_i),
-    .wrap64_getOffset(b_getOffset_o));
+  .wrap64_getOffset_cap     (operand_b_i),
+    .wrap64_getOffset       (b_getOffset_o));
 
 
-logic [`CAP_SIZE-1:0] a_isValidCap_o;
 module_wrap64_isValidCap module_wrap64_isValidCap_a (
-  .wrap64_isValidCap_cap(operand_a_i),
-    .wrap64_isValidCap(a_isValidCap_o));
+  .wrap64_isValidCap_cap    (operand_a_i),
+    .wrap64_isValidCap      (a_isValidCap_o));
 
-logic [`CAP_SIZE-1:0] b_isValidCap_o;
 module_wrap64_isValidCap module_wrap64_isValidCap_b (
-  .wrap64_isValidCap_cap(operand_b_i),
-    .wrap64_isValidCap(b_isValidCap_o));
+  .wrap64_isValidCap_cap    (operand_b_i),
+    .wrap64_isValidCap      (b_isValidCap_o));
 
 
-logic [`CAP_SIZE-1:0] a_isSealed_o;
 module_wrap64_isSealed module_wrap64_isSealed_a (
-  .wrap64_isSealed_cap(operand_a_i),
-    .wrap64_isSealed(a_isSealed_o));
+  .wrap64_isSealed_cap      (operand_a_i),
+    .wrap64_isSealed        (a_isSealed_o));
 
-logic [`CAP_SIZE-1:0] b_isSealed_o;
 module_wrap64_isSealed module_wrap64_isSealed_b (
-  .wrap64_isSealed_cap(operand_b_i),
-    .wrap64_isSealed(b_isSealed_o));
+  .wrap64_isSealed_cap      (operand_b_i),
+    .wrap64_isSealed        (b_isSealed_o));
 
 
-logic [`CAP_SIZE-1:0] a_getType_o;
 module_wrap64_getType module_wrap64_getType_a (
   .wrap64_getType_cap(operand_a_i),
     .wrap64_getType(a_getType_o));
 
-logic [`CAP_SIZE-1:0] b_getType_o;
 module_wrap64_getType module_wrap64_getType_b (
   .wrap64_getType_cap(operand_b_i),
     .wrap64_getType(b_getType_o));
 
 
-logic [`CAP_SIZE-1:0] a_getLength_o;
 module_wrap64_getLength module_getLength_a (
   .wrap64_getLength_cap(operand_a_i),
     .wrap64_getLength(a_getLength_o));
 
-logic [`CAP_SIZE-1:0] a_getFlags_o;
 module_wrap64_getFlags module_getFlags_a (
   .wrap64_getFlags_cap(operand_a_i),
     .wrap64_getFlags(a_getFlags_o));
 
-logic [`CAP_SIZE-1:0] a_setValidCap_i;
-logic [`CAP_SIZE-1:0] a_setValidCap_o;
 module_wrap64_setValidCap module_wrap64_setValidCap_a (
   .wrap64_setValidCap_cap(operand_a_i),
     .wrap64_setValidCap_valid(a_setValidCap_i),
     .wrap64_setValidCap(a_setValidCap_o));
 
-logic [`CAP_SIZE-1:0] b_setValidCap_i;
-logic [`CAP_SIZE-1:0] b_setValidCap_o;
 module_wrap64_setValidCap module_wrap64_setValidCap_b (
   .wrap64_setValidCap_cap(operand_b_i),
     .wrap64_setValidCap_valid(b_setValidCap_i),
     .wrap64_setValidCap(b_setValidCap_o));
 
-logic [`CAP_SIZE-1:0] a_setAddr_i;
-logic [`CAP_SIZE:0] a_setAddr_o;
 module_wrap64_setAddr module_wrap64_setAddr_a (
                 .wrap64_setAddr_cap(operand_a_i),
 			    .wrap64_setAddr_addr(a_setAddr_i),
 			    .wrap64_setAddr(a_setAddr_o));
 
-logic [`CAP_SIZE-1:0] b_setAddr_i;
-logic [`CAP_SIZE:0] b_setAddr_o;
 module_wrap64_setAddr module_wrap64_setAddr_b (
                 .wrap64_setAddr_cap(operand_b_i),
 			    .wrap64_setAddr_addr(b_setAddr_i),
@@ -829,6 +850,8 @@ module_wrap64_setAddr module_wrap64_setAddr_b (
   // (ie a_isValidCap_o && !a_isSealed_o && a_CURSOR_o < a_isSealed_o)
   // this may not actually be needed because exceptions have priorities
   // also need to have two vectors which hold exceptions: one for operand a and one for operand b
+
+  // check for common violations
   always_comb begin
     exceptions_a = `EXCEPTION_SIZE'b0;
     exceptions_b = `EXCEPTION_SIZE'b0;
@@ -868,10 +891,4 @@ module_wrap64_setAddr module_wrap64_setAddr_b (
       exceptions_b[PERMIT_EXECUTE_VIOLATION] = 1'b1;
 
   end
-
-
-
-
-
-
 endmodule

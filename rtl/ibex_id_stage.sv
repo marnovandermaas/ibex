@@ -27,6 +27,8 @@
 
 `define CAP_SIZE 93
 `define EXCEPTION_SIZE 22
+`define INTEGER_SIZE 32
+`define FLAG_SIZE 1
 
 
 //parameter CAP_SIZE  = 93;
@@ -91,23 +93,28 @@ module ibex_id_stage #(
     output logic [31:0]               multdiv_operand_b_ex_o,
 
 
+    // CHERI
+    // signals to the CHERI ALU
+    output logic                     cheri_en_o,                            // enable the CHERI ALU
+    output ibex_defines::cheri_base_opcode_e       cheri_base_opcode_o,
+    output ibex_defines::cheri_threeop_funct7_e    cheri_threeop_opcode_o,
+    output ibex_defines::cheri_s_a_d_funct5_e      cheri_sad_opcode_o,
+    output logic [`CAP_SIZE-1:0]      cheri_operand_a_o,
+    output logic [`CAP_SIZE-1:0]      cheri_operand_b_o,
 
-      // CHERI
-      output logic                     cheri_en_o,
-      output ibex_defines::cheri_base_opcode_e       cheri_base_opcode_o,
-      output ibex_defines::cheri_threeop_funct7_e    cheri_threeop_opcode_o,
-      output ibex_defines::cheri_store_funct5_e      cheri_store_opcode_o,
-      output ibex_defines::cheri_load_funct5_e       cheri_load_opcode_o,
-      output ibex_defines::cheri_s_a_d_funct5_e      cheri_sad_opcode_o,
-      output logic [`CAP_SIZE-1:0]      cheri_operand_a_o,
-      output logic [`CAP_SIZE-1:0]      cheri_operand_b_o,
+    // CHERI exception signals
+    input logic [`EXCEPTION_SIZE-1:0] cheri_exc_a_i,
+    input logic [`EXCEPTION_SIZE-1:0] cheri_exc_b_i,
+    input logic [`EXCEPTION_SIZE-1:0] cheri_exc_mem_i,
+    input logic [`EXCEPTION_SIZE-1:0] cheri_exc_instr_i,
 
-      input logic [`EXCEPTION_SIZE-1:0] cheri_exc_a_i,
-      input logic [`EXCEPTION_SIZE-1:0] cheri_exc_b_i,
-      input logic [`EXCEPTION_SIZE-1:0] cheri_exc_mem_i,
-      input logic                  cheri_wrote_cap_i,
+    // whether the output from the CHERI ALU is a capability
+    // this tells us whether we need to pass the output through a nullWithAddr
+    input logic                  cheri_wrote_cap_i,
 
-      output logic use_cap_base_o,
+    // tell the LSU whether it should use the address as an offset from the base or from
+    // the address of the capability that was passed in
+    output logic use_cap_base_o,
 
 
     // CSR
@@ -121,16 +128,17 @@ module ibex_id_stage #(
     output logic [31:0]               csr_mtval_o,
     input  logic                      illegal_csr_insn_i,
 
-    // SCR
+    // SCR signals
+    // DDC (direct data capability)
     input logic [`CAP_SIZE-1:0] scr_ddc_i,
 
+    // SCR read signals
     output logic  scr_access_o,
     output ibex_defines::scr_op_e scr_op_o,
     input logic [`CAP_SIZE-1:0] scr_rdata_i,
 
+    // SCR exception signal, tells us about exceptions in the SCRs
     input logic cheri_scr_exc_i,
-
-
 
     // Interface to load store unit
     output logic                      data_req_ex_o,
@@ -234,9 +242,15 @@ module ibex_id_stage #(
 
   logic [4:0]  regfile_waddr;
 
+  // integer data signals
   logic [31:0] regfile_rdata_a;
   logic [31:0] regfile_rdata_b;
-  logic [`CAP_SIZE-1:0] regfile_wdata;
+  logic [`INTEGER_SIZE-1:0] regfile_wdata;
+
+  // capability data signals
+  logic [`CAP_SIZE-1:0] regfile_rdata_a_cap;
+  logic [`CAP_SIZE-1:0] regfile_rdata_b_cap;
+  logic [`CAP_SIZE-1:0] regfile_wdata_cap;
 
   rf_wd_sel_e  regfile_wdata_sel;
   logic        regfile_we;
@@ -258,26 +272,32 @@ module ibex_id_stage #(
   logic [1:0]  multdiv_signed_mode;
 
   // CHERI
-    cheri_base_opcode_e       cheri_base_opcode;
-    cheri_threeop_funct7_e    cheri_threeop_opcode;
-    cheri_store_funct5_e      cheri_store_opcode;
-    cheri_load_funct5_e       cheri_load_opcode;
-    cheri_s_a_d_funct5_e      cheri_sad_opcode;
-    c_op_a_sel_e    cheri_op_a_mux_sel;
-    c_op_b_sel_e    cheri_op_b_mux_sel;
-    cheri_imm_b_sel_e    cheri_imm_b_mux_sel;
-    logic cheri_a_en_dec;
-    logic cheri_b_en_dec;
+  c_op_a_sel_e    cheri_op_a_mux_sel;
+  c_op_b_sel_e    cheri_op_b_mux_sel;
 
+  logic [`INTEGER_SIZE-1:0] cheri_imm_b;
+  cheri_imm_b_sel_e    cheri_imm_b_mux_sel;
 
+  // signals from decoder telling us whether each operand is being used by the instruction
+  // currently used for masking exceptions
+  logic cheri_a_en_dec;
+  logic cheri_b_en_dec;
 
-    logic [31:0] nullWithAddr_i;
-    logic [`CAP_SIZE-1:0] nullWithAddr_o;
-    logic [31:0] nullWithAddr2_i;
-    logic [`CAP_SIZE-1:0] nullWithAddr2_o;
+  // nullWithAddr function inputs and outputs
+  logic [`INTEGER_SIZE-1:0] nullWithAddr_i;
+  logic [`CAP_SIZE-1:0] nullWithAddr_o;
+  logic [`INTEGER_SIZE-1:0] nullWithAddr2_i;
+  logic [`CAP_SIZE-1:0] nullWithAddr2_o;
 
-    logic mem_ddc_relative;
+  // other function inputs and outputs
+  logic [`INTEGER_SIZE-1:0] a_getAddr_o;
+  logic [`INTEGER_SIZE-1:0] b_getAddr_o;
+  logic [`INTEGER_SIZE-1:0] rd_wdata_getAddr_o;
+  logic [`INTEGER_SIZE-1:0] pc_id_i_getOffset_o;
+  logic [`FLAG_SIZE-1:0] pcc_getFlags_o;
 
+  // whether the current instruction is ddc-relative or input-relative
+  logic mem_ddc_relative;
 
   // Data Memory Control
   logic        data_we_id;
@@ -289,15 +309,62 @@ module ibex_id_stage #(
   // CSR control
   logic        csr_status;
 
+  // ALU operands
   logic [31:0] alu_operand_a;
   logic [31:0] alu_operand_b;
 
-  // We don't want to throw exceptions when we see a call trap or return trap
-  assign cheri_exc_o = (|cheri_exc_a_i[`EXCEPTION_SIZE-3:0] && cheri_a_en_dec)
+  // mask out exceptions that should not be thrown
+  assign cheri_exc_o =
+                         // don't throw CALL_TRAP or RETURN_TRAP exceptions
+                         (|cheri_exc_a_i[`EXCEPTION_SIZE-3:0] && cheri_a_en_dec)
                       || (|cheri_exc_b_i[`EXCEPTION_SIZE-3:0] && cheri_b_en_dec)
+
+                      // when executing a CJALR, keep cheri_exc_o high until we get a new instruction
                       || ((jump_in_dec && cheri_en_o && !instr_new_i) ? cheri_exc_o : '0)
+
+                      // only throw memory-related exceptions when accessing memory
                       || (|cheri_exc_mem_i && data_req_dec)
+
+                      // throw exceptions on instruction fetch fail
+                      || (|cheri_exc_instr_i/* && !instr_new_i*/) // TODO this can trigger even when it's not supposed to
+
+                      // throw exceptions on SCR exception
                       || cheri_scr_exc_i;
+
+  // debug print
+  // TODO remove, this is not really useful
+
+  always_ff @(posedge clk_i) begin
+    if (cheri_exc_o) begin
+      $display("exc a: %h", cheri_exc_a_i & {`EXCEPTION_SIZE-2{cheri_a_en_dec}});
+      $display("exc b: %h", cheri_exc_b_i & {`EXCEPTION_SIZE-2{cheri_b_en_dec}});
+      $display("exc mem: %h", cheri_exc_mem_i & {`EXCEPTION_SIZE-2{1'b1}});
+      $display("exc instr: %h", cheri_exc_instr_i & {`EXCEPTION_SIZE-2{1'b1}});
+      $display("exc scr: %h", cheri_scr_exc_i & {`EXCEPTION_SIZE-2{1'b1}});
+      $display("capability: %h", mem_cap_o);
+      $display("base: %h", z_getBase_o);
+      $display("addr: %h", z_getAddr_o);
+      $display("length: %h", z_getLength_o);
+    end
+  end
+
+logic [`INTEGER_SIZE-1:0] z_getLength_o;
+module_wrap64_getLength module_getLength_z (
+  .wrap64_getLength_cap(mem_cap_o),
+    .wrap64_getLength(z_getLength_o));
+
+logic [`INTEGER_SIZE-1:0] z_getBase_o;
+module_wrap64_getBase module_getBase_z (
+    .wrap64_getBase_cap     (mem_cap_o),
+    .wrap64_getBase         (z_getBase_o));
+
+logic [`INTEGER_SIZE-1:0] z_getAddr_o;
+module_wrap64_getAddr module_getAddr_z (
+    .wrap64_getAddr_cap (mem_cap_o),
+    .wrap64_getAddr     (z_getAddr_o));
+
+
+
 
   /////////////
   // LSU Mux //
@@ -308,23 +375,8 @@ module ibex_id_stage #(
   assign alu_op_b_mux_sel = lsu_addr_incr_req_i ? OP_B_IMM        : alu_op_b_mux_sel_dec;
   assign imm_b_mux_sel    = lsu_addr_incr_req_i ? IMM_B_INCR_ADDR : imm_b_mux_sel_dec;
 
-  /*
-    There are 4 cases for memory accesses:
-      We're doing a legacy instruction with PCC.flag = 0
-        In this case, we want to pass the ddc to the LSU and have the offset set to whatever address the
-        legacy instruction wanted. This will involve adding the contents of the register to the immediate
-      We're doing a legacy instruction with PCC.flag = 1
-        In this case we want to pass the register capability to the LSU and have the offset be the immediate
-        that is passed in
-      We're doing a new instruction which is ddc-relative
-        In this case we want to pass the ddc and the integer contents of the register to the LSU. The integer
-        contents of the register are the offset from the base of the ddc that should be read
-      We're doing a new instruction which is not ddc-relative
-        In this case we want to pass only the capability contents of the register
-  */
+  // choose whether we want to pass DDC or the register contents as the memory access capability
   assign mem_cap_o = mem_ddc_relative ? scr_ddc_i : regfile_rdata_a_cap;
-
-
 
   ///////////////////
   // Operand A MUX //
@@ -350,6 +402,8 @@ module ibex_id_stage #(
       CHERI_OP_A_REG_CAP: cheri_operand_a_o = regfile_rdata_a_cap;
       CHERI_OP_A_REG_NUM: cheri_operand_a_o = regfile_rdata_a;
       CHERI_OP_A_REG_DDC: cheri_operand_a_o = regfile_raddr_a == '0 ? scr_ddc_i : regfile_rdata_a_cap;
+      // TODO for implementing misaligned double-word capability accesses, will need a OP_A_FWD similar to above
+      // at the moment we always throw an exception on unaligned double-word access so we don't care about this
       CHERI_OP_A_PCC: cheri_operand_a_o = pc_id_i;
       default:          cheri_operand_a_o = 'X;
     endcase
@@ -368,7 +422,7 @@ module ibex_id_stage #(
       IMM_B_U:         imm_b = imm_u_type;
       IMM_B_J:         imm_b = imm_j_type;
       IMM_B_INCR_PC:   imm_b = instr_is_compressed_i ? 32'h2 : 32'h4;
-      // this needs to be changed from 4 to 8 for double-aligned memory
+      // this has been changed from 4 to 8 for double-word aligned memory
       IMM_B_INCR_ADDR: imm_b = 32'h8;
       IMM_B_ZERO:      imm_b = 32'h0;
       default:         imm_b = 'X;
@@ -378,7 +432,6 @@ module ibex_id_stage #(
   // ALU MUX for Operand B
   assign alu_operand_b = (alu_op_b_mux_sel == OP_B_IMM) ? imm_b : regfile_rdata_b;
 
-  logic [`CAP_SIZE-1:0] cheri_imm_b;
   // CHERI Immediate mux for operand B
   always_comb begin
     unique case (cheri_imm_b_mux_sel)
@@ -409,38 +462,55 @@ module ibex_id_stage #(
 
   // Register file write enable mux - do not propagate illegal CSR ops, do not write when idle,
   // for loads/stores and multdiv operations write when the data is ready only
-  assign regfile_we = (illegal_csr_insn_i || !instr_executing || lsu_load_err_i || cheri_exc_o) ? 1'b0          :
-                      (data_req_dec || multdiv_en_dec)         ? regfile_we_wb : regfile_we_dec;
+  assign regfile_we = (  illegal_csr_insn_i
+                      || !instr_executing
+                      || lsu_load_err_i
+                      || cheri_exc_o       ) ? 1'b0
+                                             : (  data_req_dec
+                                               || multdiv_en_dec) ? regfile_we_wb
+                                                                  : regfile_we_dec;
 
   // Register file write data mux
-  logic [`CAP_SIZE-1:0] regfile_wdata_cap;
+  // in each case:
+  //    set the input to the nullWithAddr function
+  //    choose whether we want the write value to be passed through that function or not
+  //    set the write value
   always_comb begin : regfile_wdata_mux
     unique case (regfile_wdata_sel)
+      // data is coming from the EX block
+      // this means it is coming from either the MULT/DIV or ALU blocks
       RF_WD_EX: begin
         nullWithAddr_i = regfile_wdata_ex_i;
-        regfile_wdata = nullWithAddr_o;
-        regfile_wdata_cap = regfile_wdata_ex_i;
+        regfile_wdata = regfile_wdata_ex_i;
+        regfile_wdata_cap = nullWithAddr_o;
       end
 
+      // data is coming from the LSU
       RF_WD_LSU: begin
         nullWithAddr_i  = regfile_wdata_lsu_i;
-        regfile_wdata = mem_cap_access_o ? regfile_wdata_lsu_i : nullWithAddr_o;
-        regfile_wdata_cap = regfile_wdata_lsu_i;
+        regfile_wdata = regfile_wdata_lsu_i;
+        regfile_wdata_cap = mem_cap_access_o ? regfile_wdata_lsu_i : nullWithAddr_o;
       end
 
+      // data is coming from the CSRs or SCRs
       RF_WD_CSR: begin
         nullWithAddr_i  = csr_rdata_i;
-        regfile_wdata = scr_access_o ? scr_rdata_i : nullWithAddr_o;
-        regfile_wdata_cap = scr_access_o ? scr_rdata_i : csr_rdata_i;
+        regfile_wdata = scr_access_o ? scr_rdata_i : csr_rdata_i;
+        regfile_wdata_cap = scr_access_o ? scr_rdata_i : nullWithAddr_o;
       end
 
+      // data is coming from the CHERI ALU
       RF_WD_CHERI: begin
         nullWithAddr_i = regfile_wdata_ex_i;
-        regfile_wdata = cheri_wrote_cap_i ? regfile_wdata_ex_i : nullWithAddr_o;
-        regfile_wdata_cap = regfile_wdata_ex_i;
+        regfile_wdata = regfile_wdata_ex_i;
+        regfile_wdata_cap = cheri_wrote_cap_i ? regfile_wdata_ex_i : nullWithAddr_o;
       end
 
-      default:   regfile_wdata = 'X;
+      default: begin
+        regfile_wdata = 'X;
+        regfile_wdata_cap = 'X;
+        nullWithAddr_i = 'X;
+      end
     endcase;
   end
 
@@ -462,14 +532,13 @@ module ibex_id_stage #(
       .rdata_b_o    ( regfile_rdata_b_cap ),
       // write port
       .waddr_a_i    ( regfile_waddr   ),
-      .wdata_a_i    ( regfile_wdata   ),
+      .wdata_a_i    ( regfile_wdata_cap   ),
       .we_a_i       ( regfile_we      )
   );
 
+  // run getAddr on the register contents for when we're doing arithmetic
   always_comb begin
-    a_getAddr_i = regfile_rdata_a_cap;
     regfile_rdata_a = a_getAddr_o;
-    b_getAddr_i = regfile_rdata_b_cap;
     regfile_rdata_b = b_getAddr_o;
   end
 
@@ -536,23 +605,29 @@ module ibex_id_stage #(
       .multdiv_operator_o              ( multdiv_operator     ),
       .multdiv_signed_mode_o           ( multdiv_signed_mode  ),
 
-        // CHERI
-        .cheri_en_o(cheri_en_o),
-        .cheri_base_opcode_o(cheri_base_opcode_o),
-        .cheri_threeop_opcode_o(cheri_threeop_opcode_o),
-        .cheri_store_opcode_o(cheri_store_opcode_o),
-        .cheri_load_opcode_o(cheri_load_opcode_o),
-        .cheri_sad_opcode_o(cheri_sad_opcode_o),
-        .cheri_op_a_mux_sel_o(cheri_op_a_mux_sel),
-        .cheri_op_b_mux_sel_o(cheri_op_b_mux_sel),
-        .cheri_imm_b_mux_sel_o(cheri_imm_b_mux_sel),
+      // CHERI
+      // CHERI ALU enable signal
+      .cheri_en_o(cheri_en_o),
 
-        .cheri_a_en_o(cheri_a_en_dec),
-        .cheri_b_en_o(cheri_b_en_dec),
-        // TODO find this a new home
-        .cap_mode_i(pcc_getFlags_o),
-        .use_cap_base_o(use_cap_base_o),
+      // CHERI ALU operation selection signals
+      .cheri_base_opcode_o(cheri_base_opcode_o),
+      .cheri_threeop_opcode_o(cheri_threeop_opcode_o),
+      .cheri_sad_opcode_o(cheri_sad_opcode_o),
 
+      // CHERI operand selection
+      .cheri_op_a_mux_sel_o(cheri_op_a_mux_sel),
+      .cheri_op_b_mux_sel_o(cheri_op_b_mux_sel),
+      .cheri_imm_b_mux_sel_o(cheri_imm_b_mux_sel),
+
+      // CHERI operands enable
+      .cheri_a_en_o(cheri_a_en_dec),
+      .cheri_b_en_o(cheri_b_en_dec),
+
+      // tell decoder we're in capability encoding mode
+      .cap_mode_i(pcc_getFlags_o),
+
+      // capability base selection; see comment above declaration of signal
+      .use_cap_base_o(use_cap_base_o),
 
       // CSRs
       .csr_access_o                    ( csr_access_o         ),
@@ -569,8 +644,11 @@ module ibex_id_stage #(
       .data_type_o                     ( data_type_id         ),
       .data_sign_extension_o           ( data_sign_ext_id     ),
       .data_reg_offset_o               ( data_reg_offset_id   ),
+
+      // whether we're trying to read/write a capability or not
       .mem_cap_access_o (mem_cap_access_o),
 
+      // whether the memory access is relative to DDC
       .mem_ddc_relative_o (mem_ddc_relative),
 
       // jump/branches
@@ -713,15 +791,13 @@ module ibex_id_stage #(
   assign data_we_ex_o                = data_we_id;
   assign data_type_ex_o              = data_type_id;
   assign data_sign_ext_ex_o          = data_sign_ext_id;
+  // pass the data to write directly from the register file or put it through a getAddr first
   assign data_wdata_ex_o             = mem_cap_access_o ? regfile_rdata_b_cap : regfile_rdata_b;
   assign data_reg_offset_ex_o        = data_reg_offset_id;
 
   assign alu_operator_ex_o           = alu_operator;
   assign alu_operand_a_ex_o          = alu_operand_a;
   assign alu_operand_b_ex_o          = alu_operand_b;
-
-  // assign cheri_alu_operand_a_ex_o   = cheri_alu_operand_a_o;
-  // assign cheri_alu_operand_b_ex_o   = cheri_alu_operand_b_o;
 
   assign mult_en_ex_o                = mult_en_id;
   assign div_en_ex_o                 = div_en_id;
@@ -764,7 +840,7 @@ module ibex_id_stage #(
     stall_multdiv           = 1'b0;
     stall_jump              = 1'b0;
     stall_branch            = 1'b0;
-    stall_cheri_exc = 1'b0;
+    stall_cheri_exc         = 1'b0;
     branch_set_n            = 1'b0;
     perf_branch_o           = 1'b0;
     instr_ret_o             = 1'b0;
@@ -805,6 +881,8 @@ module ibex_id_stage #(
             end
             cheri_en_o && (cheri_exc_o): begin
               // there's an exception in the cheri ALU
+              // we want to wait for the pipeline to flush and do whatever else needs to be done
+              // TODO list "whatever else needs to be done"
               id_wb_fsm_ns = WAIT_MULTICYCLE;
               stall_cheri_exc = 1'b1;
               instr_multicycle_done_n = 1'b0;
@@ -827,7 +905,7 @@ module ibex_id_stage #(
           stall_multdiv           = multdiv_en_dec;
           stall_branch            = branch_in_dec;
           stall_jump              = jump_in_dec;
-          stall_cheri_exc = cheri_en_o && cheri_exc_o;
+          stall_cheri_exc         = cheri_en_o && cheri_exc_o;
         end
       end
 
@@ -839,45 +917,34 @@ module ibex_id_stage #(
 
   assign instr_ret_compressed_o = instr_ret_o & instr_is_compressed_i;
 
+  // nullWithAddr module instantiation
   module_wrap64_nullWithAddr nullWithAddr (
-      .wrap64_nullWithAddr_addr(nullWithAddr_i),
-      .wrap64_nullWithAddr(nullWithAddr_o)
-  );
+        .wrap64_nullWithAddr_addr   (nullWithAddr_i),
+        .wrap64_nullWithAddr        (nullWithAddr_o));
 
   module_wrap64_nullWithAddr nullWithAddr2 (
-      .wrap64_nullWithAddr_addr(nullWithAddr2_i),
-      .wrap64_nullWithAddr(nullWithAddr2_o)
-  );
+        .wrap64_nullWithAddr_addr   (nullWithAddr2_i),
+        .wrap64_nullWithAddr        (nullWithAddr2_o));
 
-logic [`CAP_SIZE-1:0] regfile_rdata_a_cap;
-logic [`CAP_SIZE-1:0] regfile_rdata_b_cap;
+  module_wrap64_getAddr module_getAddr_a (
+        .wrap64_getAddr_cap         (regfile_rdata_a_cap),
+        .wrap64_getAddr             (a_getAddr_o));
 
-logic [`CAP_SIZE-1:0] a_getAddr_i;
-logic [`CAP_SIZE-1:0] a_getAddr_o;
-module_wrap64_getAddr module_getAddr_a (
-    .wrap64_getAddr_cap(a_getAddr_i),
-    .wrap64_getAddr(a_getAddr_o));
+  module_wrap64_getAddr module_getAddr_b (
+        .wrap64_getAddr_cap         (regfile_rdata_b_cap),
+        .wrap64_getAddr             (b_getAddr_o));
 
-logic [`CAP_SIZE-1:0] b_getAddr_i;
-logic [`CAP_SIZE-1:0] b_getAddr_o;
-module_wrap64_getAddr module_getAddr_b (
-    .wrap64_getAddr_cap(b_getAddr_i),
-    .wrap64_getAddr(b_getAddr_o));
+  module_wrap64_getAddr module_getAddr_rd (
+        .wrap64_getAddr_cap         (regfile_wdata_cap),
+        .wrap64_getAddr             (rd_wdata_getAddr_o));
 
-logic [`CAP_SIZE-1:0] rd_wdata_getAddr_o;
-module_wrap64_getAddr module_getAddr_rd (
-    .wrap64_getAddr_cap(regfile_wdata),
-    .wrap64_getAddr(rd_wdata_getAddr_o));
+  module_wrap64_getOffset module_getOffset_pc_id_i (
+        .wrap64_getOffset_cap       (pc_id_i),
+        .wrap64_getOffset           (pc_id_i_getOffset_o));
 
-logic [`CAP_SIZE-1:0] pc_id_i_getOffset_o;
-module_wrap64_getOffset module_getOffset_pc_id_i (
-  .wrap64_getOffset_cap(pc_id_i),
-    .wrap64_getOffset(pc_id_i_getOffset_o));
-
-logic [`CAP_SIZE-1:0] pcc_getFlags_o;
-module_wrap64_getFlags module_getFlags_pcc (
-  .wrap64_getFlags_cap(pc_id_i),
-    .wrap64_getFlags(pcc_getFlags_o));
+  module_wrap64_getFlags module_getFlags_pcc (
+        .wrap64_getFlags_cap        (pc_id_i),
+        .wrap64_getFlags            (pcc_getFlags_o));
 
 
 

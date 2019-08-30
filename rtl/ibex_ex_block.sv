@@ -52,8 +52,6 @@ module ibex_ex_block #(
     input logic                     cheri_en_i,
     input ibex_defines::cheri_base_opcode_e       cheri_base_opcode_i,
     input ibex_defines::cheri_threeop_funct7_e    cheri_threeop_opcode_i,
-    input ibex_defines::cheri_store_funct5_e      cheri_store_opcode_i,
-    input ibex_defines::cheri_load_funct5_e       cheri_load_opcode_i,
     input ibex_defines::cheri_s_a_d_funct5_e      cheri_sad_opcode_i,
     input logic [`CAP_SIZE-1:0]      cheri_operand_a_i,
     input logic [`CAP_SIZE-1:0]      cheri_operand_b_i,
@@ -159,8 +157,6 @@ module ibex_ex_block #(
   ibex_cheri_alu cheri_alu (
       .base_opcode_i(cheri_base_opcode_i),
       .threeop_opcode_i(cheri_threeop_opcode_i),
-      .store_opcode_i(cheri_store_opcode_i),
-      .load_opcode_i(cheri_load_opcode_i),
       .sad_opcode_i(cheri_sad_opcode_i),
 
       // TODO rest of connections
@@ -171,7 +167,7 @@ module ibex_ex_block #(
       .alu_operand_a_o(cheri_alu_operand_a),
       .alu_operand_b_o(cheri_alu_operand_b),
       .alu_operator_o(cheri_alu_operator),
-      .alu_result_i(alu_adder_result_ex_o),
+      .alu_result_i(alu_adder_result_ext[33:1]),
       .exceptions_a_o(cheri_exc_a),
       .exceptions_b_o(cheri_exc_b)
 
