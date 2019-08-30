@@ -323,7 +323,7 @@ module ibex_id_stage #(
                       || ((jump_in_dec && cheri_en_o && !instr_new_i) ? cheri_exc_o : '0)
 
                       // only throw memory-related exceptions when accessing memory
-                      || (|cheri_exc_mem_i && data_req_dec)
+                      || (|cheri_exc_mem_i && data_req_dec && !lsu_addr_incr_req_i)
 
                       // throw exceptions on instruction fetch fail
                       || (|cheri_exc_instr_i/* && !instr_new_i*/) // TODO this can trigger even when it's not supposed to

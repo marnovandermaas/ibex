@@ -55,6 +55,7 @@ module ibex_load_store_unit (
 
     // TODO address is redundant if we use the capability for the address
     // however, if we're using ddc as our capability the address might not be redundant
+    // address to output to memory
     output logic [31:0]  data_addr_o,
     output logic         data_we_o,
     output logic [7:0]   data_be_o,
@@ -86,6 +87,7 @@ module ibex_load_store_unit (
     input logic [`EXCEPTION_SIZE-1:0] cheri_mem_exc_i,
     // TODO remove debug signal
     output logic [2:0]   wdata_offset_o,   // mux control for data to be written to memory
+    output logic [31:0] data_addr_real_o,
 
     // exception signals
     output logic         load_err_o,
@@ -126,8 +128,8 @@ module ibex_load_store_unit (
 
   ls_fsm_e ls_fsm_cs, ls_fsm_ns;
 
-  // TODO do i want the offset or the address here?
   assign data_addr = (use_cap_base_i ? data_cap_i_getBase_o : data_cap_i_getAddr_o) + adder_result_ex_i;
+  assign data_addr_real_o = data_addr;
 
   ///////////////////
   // BE generation //

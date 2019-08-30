@@ -470,6 +470,7 @@ module ibex_core #(
       .cheri_exc_b_i(cheri_exc_b),
       .cheri_exc_o(cheri_exc),
       .cheri_exc_mem_i(cheri_data_exc),
+      .cheri_exc_instr_i(cheri_instr_exc),
       .cheri_wrote_cap_i(cheri_wrote_cap),
 
       .use_cap_base_o(use_cap_base),
@@ -634,6 +635,7 @@ module ibex_core #(
       .use_cap_base_i (use_cap_base),
       .cheri_mem_exc_i(cheri_data_exc),
       .wdata_offset_o(lsu_offset),
+      .data_addr_real_o(data_addr),
       //.cheri_mem_exc_i(0),
 
       .addr_incr_req_o       ( lsu_addr_incr_req   ),
@@ -762,7 +764,7 @@ module ibex_core #(
       // ones. the data type will not change between accesses, but the second access will be reading something that
       // is smaller than the first one. this means that the memchecker could throw an exception where one is not
       // supposed to be thrown
-      .address_i(data_addr_o),
+      .address_i(data_addr),
       .data_type_i(data_type_ex),
       .write_i(data_we_o),
       .access_capability_i(mem_cap_access),

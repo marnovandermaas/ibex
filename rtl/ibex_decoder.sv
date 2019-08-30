@@ -800,7 +800,7 @@ module ibex_decoder #(
                 cheri_en_o = 1'b0;
 
                 mem_ddc_relative_o = ~instr[23];
-                use_cap_base_o = instr[10];
+                use_cap_base_o = instr[23];
 
                 alu_op_a_mux_sel_o = OP_A_REG_A;
                 alu_op_b_mux_sel_o = OP_B_IMM;
