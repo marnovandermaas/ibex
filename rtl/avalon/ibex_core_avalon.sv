@@ -123,7 +123,7 @@ module ibex_core_avalon #(
       .clk_i(clk_i),
       .rst_ni(!rst_i),
       .address_i(data_addr_o[31:3]),
-      .we_i(data_we_o),
+      .we_i(data_gnt_i && data_we_o),
       // TODO parameterize this 64
       .writedata_i(data_wtag_o),
       .readdata_o(data_rtag_i)
