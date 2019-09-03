@@ -615,12 +615,14 @@ module ibex_core #(
       .data_gnt_i            ( data_gnt_i          ),
       .data_rvalid_i         ( data_rvalid_i       ),
       .data_err_i            ( data_err_i          ),
-
-      .data_addr_o           ( data_addr_o         ),
+      .data_addr_aligned_o   ( data_addr_o         ),
       .data_we_o             ( data_we_o           ),
       .data_be_o             ( data_be           ),
       .data_wdata_o          ( data_wdata        ),
       .data_rdata_i          ( data_rdata        ),
+
+      // actual byte address being accessed
+      .data_addr_unaligned_o ( data_addr           ),
 
       // signals to/from ID/EX stage
       .data_we_ex_i          ( data_we_ex          ),
@@ -637,9 +639,6 @@ module ibex_core #(
       .data_cap_i (mem_cap),
       .use_cap_base_i (use_cap_base),
       .cheri_mem_exc_i(cheri_data_exc),
-      .wdata_offset_o(lsu_offset),
-      .data_addr_real_o(data_addr),
-      //.cheri_mem_exc_i(0),
 
       .addr_incr_req_o       ( lsu_addr_incr_req   ),
       .addr_last_o           ( lsu_addr_last       ),
@@ -756,7 +755,6 @@ module ibex_core #(
   logic [`CAP_SIZE-1:0] data_rdata;
   logic [`CAP_SIZE-1:0] data_wdata;
   logic [7:0] data_be;
-  logic [2:0] lsu_offset;
 
   ibex_cheri_memchecker #(
       .DATA_MEM(1'b1)
@@ -775,7 +773,6 @@ module ibex_core #(
       .mem_tag_i(data_rtag_i),
       .lsu_data_i(data_wdata),
       .data_be_i(data_be),
-      .offset(lsu_offset),
 
       .data_be_o(data_be_o),
       .mem_data_o(data_wdata_o),
@@ -797,14 +794,13 @@ module ibex_core #(
       .data_type_i(2'b0),
       .data_be_i(),
       .data_be_o(),
-      .offset(),
 
       // we never write instructions
       .write_i('0),
       // likewise, we never read capabilities from the instruction stream
       .access_capability_i('0),
       .mem_data_i(),
-      .mem_tag_i(),
+      .mem_tag_i('0),
       .lsu_data_i(),
 
       .mem_data_o(),
@@ -865,7 +861,7 @@ module ibex_core #(
   // Keep the mem data stable for each instruction cycle
   always_comb begin
     if (rvfi_insn_new_d && lsu_data_valid) begin
-      rvfi_mem_addr_d  = data_addr_o;
+      rvfi_mem_addr_d  = lsu_addr_incr_req ? rvfi_mem_addr_q : data_addr;
       rvfi_mem_rdata_d = regfile_wdata_lsu;
       rvfi_mem_wdata_d = mem_cap_access ? data_wdata_o : data_wdata_ex;
     end else begin

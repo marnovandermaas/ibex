@@ -52,17 +52,18 @@ module ibex_load_store_unit (
     input  logic         data_gnt_i,
     input  logic         data_rvalid_i,
     input  logic         data_err_i,
-
-    // TODO address is redundant if we use the capability for the address
-    // however, if we're using ddc as our capability the address might not be redundant
-    // address to output to memory
-    output logic [31:0]  data_addr_o,
+    output logic [31:0]  data_addr_aligned_o,
     output logic         data_we_o,
     output logic [7:0]   data_be_o,
     output logic [`CAP_SIZE-1:0]  data_wdata_o,
     input  logic [`CAP_SIZE-1:0]  data_rdata_i,
 
+    // byte address being accessed
+    output logic [31:0]  data_addr_unaligned_o,
+
     // signals to/from ID/EX stage
+    input  logic [`CAP_SIZE-1:0] data_cap_i,   // capability that provides authority
+    input  logic         use_cap_base_i,       // whether to use the base or address of the capability
     input  logic         data_we_ex_i,         // write enable                     -> from ID/EX
     input  logic [1:0]   data_type_ex_i,       // data type: word, half word, byte -> from ID/EX
     input  logic [`CAP_SIZE-1:0]  data_wdata_ex_i,      // data to write to memory          -> from ID/EX
@@ -82,12 +83,7 @@ module ibex_load_store_unit (
                                                // -> AGU for misaligned accesses
     output logic         data_valid_o,         // LSU has completed transaction    -> to 
 
-    input logic [`CAP_SIZE-1:0] data_cap_i,
-    input logic use_cap_base_i,
-    input logic [`EXCEPTION_SIZE-1:0] cheri_mem_exc_i,
-    // TODO remove debug signal
-    output logic [2:0]   wdata_offset_o,   // mux control for data to be written to memory
-    output logic [31:0] data_addr_real_o,
+    input logic [`EXCEPTION_SIZE-1:0] cheri_mem_exc_i, // memory exceptions from memory checker
 
     // exception signals
     output logic         load_err_o,
@@ -96,7 +92,13 @@ module ibex_load_store_unit (
     output logic         busy_o
 );
 
+  // function outputs
+  logic [`INTEGER_SIZE-1:0] cap_getOffset_o;
+  logic [`INTEGER_SIZE-1:0] cap_getAddr_o;
+  logic [`INTEGER_SIZE-1:0] cap_getBase_o;
+
   logic [31:0]  data_addr;
+  // this is no longer needed, we instead want double-word aligned addresses
   //logic [31:0]  data_addr_w_aligned;
   logic [31:0]  data_addr_d_aligned;
   logic [31:0]  addr_last_q, addr_last_d;
@@ -128,8 +130,9 @@ module ibex_load_store_unit (
 
   ls_fsm_e ls_fsm_cs, ls_fsm_ns;
 
-  assign data_addr = (use_cap_base_i ? data_cap_i_getBase_o : data_cap_i_getAddr_o) + adder_result_ex_i;
-  assign data_addr_real_o = data_addr;
+  // TODO this is working, but interferes with addr_last being set properly to data_addr
+  assign data_addr = (use_cap_base_i ? cap_getBase_o : cap_getAddr_o) + adder_result_ex_i;
+  assign data_addr_unaligned_o = data_addr;
 
   ///////////////////
   // BE generation //
@@ -236,7 +239,6 @@ module ibex_load_store_unit (
   // prepare data to be written to the memory
   // we handle misaligned accesses, half word and byte accesses and
   // register offsets here
-  assign wdata_offset_o = data_addr[2:0];
   assign wdata_offset = data_addr[2:0] - data_reg_offset_ex_i[1:0];
   always_comb begin
     unique case (wdata_offset)
@@ -479,6 +481,7 @@ module ibex_load_store_unit (
     addr_incr_req_o     = 1'b0;
     handle_misaligned_d = handle_misaligned_q;
 
+    // TODO need to change how exceptions are checked here
     unique case (ls_fsm_cs)
 
       IDLE: begin
@@ -571,6 +574,7 @@ module ibex_load_store_unit (
       // this can't simply be the last address, because the address calculated there already includes the
       // capability base. if we were to use that one, then when performing multicycle loads/stores,
       // we would add the capability offset twice which is incorrect
+      // TODO rework this so that this can just be the last address
       addr_last_d = adder_result_ex_i;
     end
   end
@@ -596,16 +600,12 @@ module ibex_load_store_unit (
   assign data_rdata_ex_o = data_rdata_ext;
 
   // output data address must be word aligned
-  //assign data_addr_w_aligned = {data_addr[31:2], 2'b00};
   assign data_addr_d_aligned = {data_addr[31:3], 3'b000};
 
   // output to data interface
-  //assign data_addr_o   = data_addr_w_aligned;
-  assign data_addr_o   = data_addr_d_aligned;
-  // THIS SCREWS UP UNALIGNED ADDRESSES
-  // original:
-  //assign data_wdata_o  = data_wdata;
-  // TODO need to align double-size accesses as well
+  assign data_addr_aligned_o   = data_addr_d_aligned;
+
+  // TODO might need to align double-size accesses as well if the spec changes to allow this
   assign data_wdata_o  = (data_type_ex_i == 2'b11) ? data_wdata_ex_i : data_wdata;
   assign data_we_o     = data_we_ex_i;
   assign data_be_o     = data_be;
@@ -621,21 +621,17 @@ module ibex_load_store_unit (
   assign busy_o = (ls_fsm_cs == WAIT_RVALID) | (data_req_o == 1'b1);
 
 
-logic [`CAP_SIZE-1:0] data_cap_i_getOffset_o;
 module_wrap64_getOffset module_getOffset_data_cap (
-  .wrap64_getOffset_cap(data_cap_i),
-    .wrap64_getOffset(data_cap_i_getOffset_o));
+    .wrap64_getOffset_cap(data_cap_i),
+    .wrap64_getOffset(cap_getOffset_o));
 
-logic [`CAP_SIZE-1:0] data_cap_i_getAddr_o;
 module_wrap64_getAddr module_getAddr_data_cap (
     .wrap64_getAddr_cap(data_cap_i),
-    .wrap64_getAddr(data_cap_i_getAddr_o));
+    .wrap64_getAddr(cap_getAddr_o));
 
-logic [`CAP_SIZE-1:0] data_cap_i_getBase_o;
 module_wrap64_getBase module_getBase_data_cap (
     .wrap64_getBase_cap(data_cap_i),
-    .wrap64_getBase(data_cap_i_getBase_o));
-
+    .wrap64_getBase(cap_getBase_o));
 
 
   ////////////////
