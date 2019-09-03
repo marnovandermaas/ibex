@@ -37,7 +37,8 @@
 `define IMM_SIZE 12
 `define PERMIT_SEAL_INDEX 7
 `define PERMIT_UNSEAL_INDEX 9
-`define PERMIT_EXECUTE_INDEX 10
+`define PERMIT_EXECUTE_INDEX 1
+`define PERMIT_CCALL_INDEX 8
 `define MIN_INSTR_BYTES 2
 
 
@@ -101,6 +102,7 @@ module ibex_cheri_alu (
   input ibex_defines::cheri_base_opcode_e             base_opcode_i,
   input ibex_defines::cheri_threeop_funct7_e          threeop_opcode_i,
   input ibex_defines::cheri_s_a_d_funct5_e  sad_opcode_i,
+  input ibex_defines::cheri_ccall_e ccall_type_i,
 
   input logic [`CAP_SIZE-1:0] operand_a_i,
   input logic [`CAP_SIZE-1:0] operand_b_i,
@@ -148,6 +150,7 @@ logic [`INTEGER_SIZE:0] a_getTop_o;
 
 logic [`INTEGER_SIZE:0] b_getTop_o;
 
+logic [`CAP_SIZE-1:0] a_setType_cap_i;
 logic [`OTYPE_SIZE-1:0] a_setType_i;
 logic [`CAP_SIZE:0] a_setType_o;
 
@@ -220,6 +223,7 @@ logic [`CAP_SIZE:0] b_setAddr_o;
     wroteCapability = '0;
 
     a_setBounds_i = '0;
+    a_setType_cap_i = '0;
     a_setType_i = '0;
     b_setType_i = '0;
     a_setPerms_i = '0;
@@ -253,10 +257,10 @@ logic [`CAP_SIZE:0] b_setAddr_o;
             alu_operand_b_o = operand_b_i;
             alu_operator_o = ALU_ADD;
 
-            exceptions_a_o =   exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
-                            |  exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
-                            |  exceptions_a[LENGTH_VIOLATION] << LENGTH_VIOLATION
-                            |  ((alu_result_i > a_getTop_o) << LENGTH_VIOLATION);
+            exceptions_a_o =( exceptions_a[TAG_VIOLATION]    )  << TAG_VIOLATION
+                           |( exceptions_a[SEAL_VIOLATION]   )  << SEAL_VIOLATION
+                           |( exceptions_a[LENGTH_VIOLATION] )  << LENGTH_VIOLATION
+                           |( alu_result_i > a_getTop_o      )  << LENGTH_VIOLATION;
             //$display("csetbounds output: %h   exceptions: %h", returnvalue_o, exceptions_a_o);
           end
 
@@ -270,48 +274,47 @@ logic [`CAP_SIZE:0] b_setAddr_o;
             alu_operator_o = ALU_ADD;
 
 
-            exceptions_a_o =    (  exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
-                                 | exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
-                                 | exceptions_a[LENGTH_VIOLATION] << LENGTH_VIOLATION
-                                )
-                              | ((alu_result_i > a_getTop_o) << LENGTH_VIOLATION)
-                              | ((!a_setBounds_o[`CAP_SIZE] << INEXACT_BOUNDS_VIOLATION));
+            exceptions_a_o =( exceptions_a[TAG_VIOLATION]    )  << TAG_VIOLATION
+                           |( exceptions_a[SEAL_VIOLATION]   )  << SEAL_VIOLATION
+                           |( exceptions_a[LENGTH_VIOLATION] )  << LENGTH_VIOLATION
+                           |( alu_result_i > a_getTop_o      )  << LENGTH_VIOLATION
+                           |( !a_setBounds_o[`CAP_SIZE]      )  << INEXACT_BOUNDS_VIOLATION;
             //$display("csetboundse output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           C_SEAL: begin
+            a_setType_cap_i = operand_a_i;
             a_setType_i = b_getAddr_o;
             returnvalue_o = a_setType_o;
             wroteCapability = 1'b1;
 
-            exceptions_a_o =    exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
-                              | exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
-                              | ((!a_setType_o[`CAP_SIZE] << INEXACT_BOUNDS_VIOLATION));
+            exceptions_a_o =( exceptions_a[TAG_VIOLATION]  ) << TAG_VIOLATION
+                           |( exceptions_a[SEAL_VIOLATION] ) << SEAL_VIOLATION
+                           |( !a_setType_o[`CAP_SIZE]      ) << INEXACT_BOUNDS_VIOLATION;
 
-            exceptions_b_o =  ( exceptions_b[TAG_VIOLATION] << TAG_VIOLATION
-                              | exceptions_b[SEAL_VIOLATION] << SEAL_VIOLATION
-                              | exceptions_b[LENGTH_VIOLATION] << LENGTH_VIOLATION)
-                              | ((b_getAddr_o > b_getTop_o) << LENGTH_VIOLATION)
-                              // capabilities with type -1 are unsealed
-                              | ((b_getAddr_o > {`OTYPE_SIZE{1'b1}}) << LENGTH_VIOLATION)
-                              | exceptions_b[PERMIT_SEAL_VIOLATION] << PERMIT_SEAL_VIOLATION;
+            exceptions_b_o =( exceptions_b[TAG_VIOLATION]          ) << TAG_VIOLATION
+                           |( exceptions_b[SEAL_VIOLATION]         ) << SEAL_VIOLATION
+                           |( exceptions_b[LENGTH_VIOLATION]       ) << LENGTH_VIOLATION
+                           |( b_getAddr_o >= b_getTop_o            ) << LENGTH_VIOLATION
+                           |( b_getAddr_o > {`OTYPE_SIZE{1'b1}}    ) << LENGTH_VIOLATION //-1 means unsealed
+                           |( exceptions_b[PERMIT_SEAL_VIOLATION]  ) << PERMIT_SEAL_VIOLATION;
             //$display("cseal output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           C_UNSEAL: begin
+            a_setType_cap_i = operand_a_i;
             a_setType_i = {`OTYPE_SIZE{1'b1}};
             returnvalue_o = a_setType_o;
             wroteCapability = 1'b1;
 
-            exceptions_a_o =  exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
-                            | ((!a_isSealed_o) << SEAL_VIOLATION);
+            exceptions_a_o =( exceptions_a[TAG_VIOLATION] ) << TAG_VIOLATION
+                           |( !a_isSealed_o               ) << SEAL_VIOLATION;
 
-            exceptions_b_o =  exceptions_b[TAG_VIOLATION] << TAG_VIOLATION
-                            | b_isSealed_o << SEAL_VIOLATION
-                            // TODO check this (does it need to be truncated?)
-                            | ((b_getAddr_o != a_getType_o) << TYPE_VIOLATION)
-                            | exceptions_b[PERMIT_UNSEAL_VIOLATION] << PERMIT_UNSEAL_VIOLATION
-                            | ((b_getAddr_o >= b_getTop_o) << LENGTH_VIOLATION);
+            exceptions_b_o =( exceptions_b[TAG_VIOLATION]           ) << TAG_VIOLATION
+                           |( b_isSealed_o                          ) << SEAL_VIOLATION
+                           |( b_getAddr_o != a_getType_o            ) << TYPE_VIOLATION
+                           |( exceptions_b[PERMIT_UNSEAL_VIOLATION] ) << PERMIT_UNSEAL_VIOLATION
+                           |( b_getAddr_o >= b_getTop_o             ) << LENGTH_VIOLATION;
             //$display("cunseal output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
@@ -320,8 +323,9 @@ logic [`CAP_SIZE:0] b_setAddr_o;
             returnvalue_o = a_setPerms_o;
             wroteCapability = 1'b1;
 
-            exceptions_a_o = (exceptions_a & (   1'b1 << TAG_VIOLATION
-                                               | 1'b1 << SEAL_VIOLATION));
+            exceptions_a_o =( exceptions_a[TAG_VIOLATION]  ) << TAG_VIOLATION
+                           |( exceptions_a[SEAL_VIOLATION] ) << SEAL_VIOLATION;
+
             //$display("candperm output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
@@ -400,8 +404,8 @@ logic [`CAP_SIZE:0] b_setAddr_o;
                               a_setOffset_o[`CAP_SIZE] ? 1'b1 :
                                                          1'b0;
 
-            exceptions_a_o =  (operand_b_i != '0 && exceptions_a[TAG_VIOLATION]) << TAG_VIOLATION
-                            | (operand_b_i != '0 && exceptions_a[SEAL_VIOLATION]) << SEAL_VIOLATION;
+            exceptions_a_o =( operand_b_i != '0 && exceptions_a[TAG_VIOLATION]  ) << TAG_VIOLATION
+                           |( operand_b_i != '0 && exceptions_a[SEAL_VIOLATION] ) << SEAL_VIOLATION;
             //$display("cfromptr output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
@@ -420,11 +424,11 @@ logic [`CAP_SIZE:0] b_setAddr_o;
             returnvalue_o = b_setType_o | {1'b1, {`CAP_SIZE-1{1'b0}}};
             wroteCapability = 1'b1;
 
-            exceptions_a_o = exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
-                            |exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
-                            |((b_getBase_o < a_getBase_o) << LENGTH_VIOLATION)
-                            |((b_getTop_o > a_getTop_o) << LENGTH_VIOLATION)
-                            |(((a_getPerms_o & b_getPerms_o) != b_getPerms_o) << SOFTWARE_DEFINED_VIOLATION);
+            exceptions_a_o =( exceptions_a[TAG_VIOLATION]                   ) << TAG_VIOLATION
+                           |( exceptions_a[SEAL_VIOLATION]                  ) << SEAL_VIOLATION
+                           |( b_getBase_o < a_getBase_o                     ) << LENGTH_VIOLATION
+                           |( b_getTop_o > a_getTop_o                       ) << LENGTH_VIOLATION
+                           |( (a_getPerms_o & b_getPerms_o) != b_getPerms_o ) << SOFTWARE_DEFINED_VIOLATION;
 
             exceptions_b_o = (b_getBase_o > b_getTop_o) << LENGTH_VIOLATION;
             //$display("cbuildcap output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
@@ -464,14 +468,16 @@ logic [`CAP_SIZE:0] b_setAddr_o;
             returnvalue_o = b_isSealed_o ? a_setOffset_o : {`INTEGER_SIZE{1'b1}};
             wroteCapability = b_isSealed_o;
 
-            exceptions_a_o = exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
-                            |exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
-                            |((b_isSealed_o && b_getType_o < a_getBase_o) << LENGTH_VIOLATION)
-                            |((b_isSealed_o && b_getType_o >= a_getTop_o) << LENGTH_VIOLATION);
+            exceptions_a_o =( exceptions_a[TAG_VIOLATION]               ) << TAG_VIOLATION
+                           |( exceptions_a[SEAL_VIOLATION]              ) << SEAL_VIOLATION
+                           |( b_isSealed_o && b_getType_o < a_getBase_o ) << LENGTH_VIOLATION
+                           |( b_isSealed_o && b_getType_o >= a_getTop_o ) << LENGTH_VIOLATION;
             //$display("ccopytype output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
+          // TODO C_C_SEAL is working (probably, haven't found any issues yet) but needs to be rewritten below to look decent
           C_C_SEAL: begin
+            a_setType_cap_i = operand_a_i;
             a_setType_i = b_getAddr_o;
             returnvalue_o = (!b_isValidCap_o || b_getAddr_o == {`INTEGER_SIZE{1'b1}}) ? operand_a_i : a_setType_o;
             wroteCapability = 1'b1;
@@ -481,55 +487,88 @@ logic [`CAP_SIZE:0] b_setAddr_o;
                             |((exceptions_a[SEAL_VIOLATION] && !(!b_isValidCap_o || b_getAddr_o == {`INTEGER_SIZE{1'b1}}))
                                << SEAL_VIOLATION);
 
-            exceptions_b_o = ((exceptions_b[SEAL_VIOLATION] && !(!b_isValidCap_o || b_getAddr_o == {`INTEGER_SIZE{1'b1}}))<< SEAL_VIOLATION)
-                            |((exceptions_b[PERMIT_SEAL_VIOLATION] && !(!b_isValidCap_o || b_getAddr_o == {`INTEGER_SIZE{1'b1}})) << PERMIT_SEAL_VIOLATION)
-                            |((exceptions_b[LENGTH_VIOLATION] && !(!b_isValidCap_o || b_getAddr_o == {`INTEGER_SIZE{1'b1}})) << LENGTH_VIOLATION)
-                            |((b_getAddr_o >= b_getTop_o && !(!b_isValidCap_o || b_getAddr_o == {`INTEGER_SIZE{1'b1}})) << LENGTH_VIOLATION)
-                            |((b_getAddr_o > {`OTYPE_SIZE{1'b1}} && !(!b_isValidCap_o || b_getAddr_o == {`INTEGER_SIZE{1'b1}})) << LENGTH_VIOLATION);
+            exceptions_b_o =( exceptions_b[SEAL_VIOLATION]        && b_isValidCap_o && b_getAddr_o == {`INTEGER_SIZE{1'b1}} ) << SEAL_VIOLATION
+                           |( exceptions_b[PERMIT_SEAL_VIOLATION] && b_isValidCap_o && b_getAddr_o == {`INTEGER_SIZE{1'b1}} ) << PERMIT_SEAL_VIOLATION
+                           |( exceptions_b[LENGTH_VIOLATION]      && b_isValidCap_o && b_getAddr_o == {`INTEGER_SIZE{1'b1}} ) << LENGTH_VIOLATION
+                           |( b_getAddr_o >= b_getTop_o           && b_isValidCap_o && b_getAddr_o == {`INTEGER_SIZE{1'b1}} ) << LENGTH_VIOLATION
+                           |( b_getAddr_o > {`OTYPE_SIZE{1'b1}}   && b_isValidCap_o && b_getAddr_o == {`INTEGER_SIZE{1'b1}} ) << LENGTH_VIOLATION;
             //$display("ccseal output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
           C_TEST_SUBSET: begin
-            returnvalue_o = a_isValidCap_o != b_isValidCap_o ?            1'b0 :
-                            b_getBase_o < a_getBase_o ?                     1'b0 :
-                            b_getTop_o > a_getTop_o ?                       1'b0 :
+            returnvalue_o = a_isValidCap_o != b_isValidCap_o              ? 1'b0 :
+                            b_getBase_o < a_getBase_o                     ? 1'b0 :
+                            b_getTop_o > a_getTop_o                       ? 1'b0 :
                             (b_getPerms_o & a_getPerms_o) == b_getPerms_o ? 1'b0 :
-                                                                          1'b1;
+                                                                            1'b1;
             wroteCapability = 1'b0;
             //$display("ctestsubset output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
-          // TODO implement later
-          STORE: begin
-            // TODO
-          end
-
-          // TODO implement later
-          // TODO can implement all loads using this, including capability loads
-          //      however, capability loads need to be capability-aligned.
-          //      there should be no other unaligned loads since we deal with them by just doing two
-          //      aligned loads
-          LOAD: begin
-            // TODO
-          end
-
-          // TODO implement CCALLFAST instead of regular CCALL
           CCALL: begin
-            // when trying to read this using the spec, cs is my operand_a and cb is my operand_b
-            // in general in the rest of this file this is the other way around, with cb being operand_a
-            // and cs being operand b
-            exceptions_a_o = exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
-                            |exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
-                            |((a_getType_o != b_getType_o) << TYPE_VIOLATION)
-                            |exceptions_a[PERMIT_EXECUTE_VIOLATION] << PERMIT_EXECUTE_VIOLATION
-                            |exceptions_a[LENGTH_VIOLATION] << LENGTH_VIOLATION
-                            |((a_getAddr_o >= a_getTop_o) << LENGTH_VIOLATION)
-                            |(1'b1 << CALL_TRAP);
+            // when trying to read this using the Sail definitions, cs is my operand_a and cb is my operand_b
+            unique case (ccall_type_i)
+              CCALL_CCALL: begin
+                exceptions_a_o =( exceptions_a[TAG_VIOLATION]            ) << TAG_VIOLATION
+                               |( exceptions_a[SEAL_VIOLATION]           ) << SEAL_VIOLATION
+                               |( a_getType_o != b_getType_o             ) << TYPE_VIOLATION
+                               |( exceptions_a[PERMIT_EXECUTE_VIOLATION] ) << PERMIT_EXECUTE_VIOLATION
+                               |( exceptions_a[LENGTH_VIOLATION]         ) << LENGTH_VIOLATION
+                               |( a_getAddr_o >= a_getTop_o              ) << LENGTH_VIOLATION
+                               |( 1'b1 << CALL_TRAP);
 
-            exceptions_b_o = exceptions_b[TAG_VIOLATION] << TAG_VIOLATION
-                            |exceptions_b[SEAL_VIOLATION] << SEAL_VIOLATION
-                            |((b_getPerms_o[`PERMIT_EXECUTE_INDEX]) << PERMIT_EXECUTE_VIOLATION);
-            //$display("ccall output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
+                exceptions_b_o =( exceptions_b[TAG_VIOLATION]         ) << TAG_VIOLATION
+                               |( exceptions_b[SEAL_VIOLATION]        ) << SEAL_VIOLATION
+                               |( b_getPerms_o[`PERMIT_EXECUTE_INDEX] ) << PERMIT_EXECUTE_VIOLATION;
+              end
+
+              CCALL_CRETURN: begin
+                exceptions_a_o = 1'b1 << RETURN_TRAP;
+              end
+
+              CCALL_CCALLFAST_CYCLE1: begin
+                a_setAddr_i = {a_getAddr_o[`INTEGER_SIZE-1:1], 1'b0};
+
+                exceptions_a_o =( exceptions_a[TAG_VIOLATION]                                            ) << TAG_VIOLATION
+                               |( !exceptions_a[SEAL_VIOLATION]                                          ) << SEAL_VIOLATION // we want it to be sealed
+                               |( a_getType_o != b_getType_o                                             ) << TYPE_VIOLATION
+                               |( exceptions_a[PERMIT_CCALL_VIOLATION]                                   ) << PERMIT_CCALL_VIOLATION
+                               |( exceptions_a[PERMIT_EXECUTE_VIOLATION]                                 ) << PERMIT_EXECUTE_VIOLATION
+                               |( {a_getAddr_o[`INTEGER_SIZE-1:1], 1'b0} < a_getBase_o                   ) << LENGTH_VIOLATION
+                               |( {a_getAddr_o[`INTEGER_SIZE-1:1], 1'b0} + `MIN_INSTR_BYTES > a_getTop_o ) << LENGTH_VIOLATION;
+
+                exceptions_b_o =( exceptions_b[TAG_VIOLATION]             ) << TAG_VIOLATION
+                               |( !exceptions_b[SEAL_VIOLATION]           ) << SEAL_VIOLATION
+                               |( !exceptions_b[PERMIT_EXECUTE_VIOLATION] ) << PERMIT_EXECUTE_VIOLATION
+                               |( exceptions_b[PERMIT_CCALL_VIOLATION]    ) << PERMIT_CCALL_VIOLATION;
+
+                a_setType_cap_i = a_setAddr_o;
+                a_setType_i = {`OTYPE_SIZE{1'b1}};
+                wroteCapability = 1'b1;
+                returnvalue_o = a_setType_o;
+              end
+
+              CCALL_CCALLFAST_CYCLE2: begin
+                a_setAddr_i = {a_getAddr_o[`INTEGER_SIZE-1:1], 1'b0};
+
+                exceptions_a_o =( exceptions_a[TAG_VIOLATION]                                            ) << TAG_VIOLATION
+                               |( !exceptions_a[SEAL_VIOLATION]                                          ) << SEAL_VIOLATION // we want it to be sealed
+                               |( a_getType_o != b_getType_o                                             ) << TYPE_VIOLATION
+                               |( exceptions_a[PERMIT_CCALL_VIOLATION]                                   ) << PERMIT_CCALL_VIOLATION
+                               |( exceptions_a[PERMIT_EXECUTE_VIOLATION]                                 ) << PERMIT_EXECUTE_VIOLATION
+                               |( {a_getAddr_o[`INTEGER_SIZE-1:1], 1'b0} < a_getBase_o                   ) << LENGTH_VIOLATION
+                               |( {a_getAddr_o[`INTEGER_SIZE-1:1], 1'b0} + `MIN_INSTR_BYTES > a_getTop_o ) << LENGTH_VIOLATION;
+
+                exceptions_b_o =( exceptions_b[TAG_VIOLATION]                ) << TAG_VIOLATION
+                               |( (!exceptions_b[SEAL_VIOLATION]             ) << SEAL_VIOLATION)
+                               |( ((!exceptions_b[PERMIT_EXECUTE_VIOLATION]) ) << PERMIT_EXECUTE_VIOLATION)
+                               |( exceptions_b[PERMIT_CCALL_VIOLATION]       ) << PERMIT_CCALL_VIOLATION;
+
+                b_setType_i = {`OTYPE_SIZE{1'b1}};
+                wroteCapability = 1'b1;
+                returnvalue_o = b_setType_o;
+              end
+            endcase
           end
 
           SOURCE_AND_DEST: begin
@@ -609,23 +648,22 @@ logic [`CAP_SIZE:0] b_setAddr_o;
                 // issue is this isn't a very clean way of doing this - we need to fake incoffsetimm instruction
                 // in the decoder. However, ibex already does it this way.
 
-                returnvalue_o = operand_a_i;
+                a_setAddr_i = {a_getAddr_o[`INTEGER_SIZE-1:1], 1'b0};
+                returnvalue_o = a_setAddr_o;
                 wroteCapability = 1'b1;
 
-                alu_operand_a_o = a_getAddr_o;
+                alu_operand_a_o = {a_getAddr_o[`INTEGER_SIZE-1:1], 1'b0};
                 alu_operand_b_o = `MIN_INSTR_BYTES;
                 alu_operator_o = ALU_ADD;
 
-                exceptions_a_o = exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
-                                |exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
-                                |exceptions_a[PERMIT_EXECUTE_VIOLATION] << PERMIT_EXECUTE_VIOLATION
-                                |exceptions_a[LENGTH_VIOLATION] << LENGTH_VIOLATION
-                                |((alu_result_i > a_getTop_o) << LENGTH_VIOLATION);
+                exceptions_a_o =( exceptions_a[TAG_VIOLATION]            ) << TAG_VIOLATION
+                               |( exceptions_a[SEAL_VIOLATION]           ) << SEAL_VIOLATION
+                               |( exceptions_a[PERMIT_EXECUTE_VIOLATION] ) << PERMIT_EXECUTE_VIOLATION
+                               |( exceptions_a[LENGTH_VIOLATION]         ) << LENGTH_VIOLATION
+                               |( ((alu_result_i > a_getTop_o)           ) << LENGTH_VIOLATION);
                                 // we don't care about trying to throw the last exception since we do support
                                 // compressed instructions
 
-                // we don't set wroteCapability since we're not planning on writing what we returned to
-                // a register
             //$display("cjalr output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
               end
 
@@ -673,11 +711,10 @@ logic [`CAP_SIZE:0] b_setAddr_o;
         alu_operand_b_o = {{`INTEGER_SIZE-`IMM_SIZE{1'b0}}, operand_b_i[`IMM_SIZE-1:0]};
         alu_operator_o = ALU_ADD;
 
-        exceptions_a_o = exceptions_a[TAG_VIOLATION] << TAG_VIOLATION
-                        |exceptions_a[SEAL_VIOLATION] << SEAL_VIOLATION
-                        |exceptions_a[LENGTH_VIOLATION] << LENGTH_VIOLATION
-                        //|((a_getAddr_o + operand_b_i[`IMM_SIZE-1:0] > a_getTop_o) << LENGTH_VIOLATION);
-                        |((alu_result_i > a_getTop_o) << LENGTH_VIOLATION);
+        exceptions_a_o =( exceptions_a[TAG_VIOLATION]    ) << TAG_VIOLATION
+                       |( exceptions_a[SEAL_VIOLATION]   ) << SEAL_VIOLATION
+                       |( exceptions_a[LENGTH_VIOLATION] ) << LENGTH_VIOLATION
+                       |( alu_result_i > a_getTop_o      ) << LENGTH_VIOLATION;
             //$display("csetboundsimm output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
       end
 
@@ -689,157 +726,135 @@ logic [`CAP_SIZE:0] b_setAddr_o;
   end
 
 
-
-
-
-
-
-
-// TODO rename/rearrange all of these
+// TODO rename/rearrange/refactor these
 
 module_wrap64_setBounds module_wrap64_setBounds_a (
-    .wrap64_setBounds_cap     (operand_a_i),
-    .wrap64_setBounds_length  (a_setBounds_i),
-    .wrap64_setBounds         (a_setBounds_o));
-
+      .wrap64_setBounds_cap     (operand_a_i),
+      .wrap64_setBounds_length  (a_setBounds_i),
+      .wrap64_setBounds         (a_setBounds_o));
 
 module_wrap64_getAddr module_getAddr_a (
-    .wrap64_getAddr_cap (operand_a_i),
-    .wrap64_getAddr     (a_getAddr_o));
+      .wrap64_getAddr_cap (operand_a_i),
+      .wrap64_getAddr     (a_getAddr_o));
 
 module_wrap64_getAddr module_getAddr_b (
-    .wrap64_getAddr_cap (operand_b_i),
-    .wrap64_getAddr     (b_getAddr_o));
+      .wrap64_getAddr_cap (operand_b_i),
+      .wrap64_getAddr     (b_getAddr_o));
 
 module_wrap64_getTop module_wrap64_getTop_a (
-  .wrap64_getTop_cap    (operand_a_i),
-    .wrap64_getTop      (a_getTop_o));
+      .wrap64_getTop_cap  (operand_a_i),
+      .wrap64_getTop      (a_getTop_o));
 
 module_wrap64_getTop module_wrap64_getTop_b (
-  .wrap64_getTop_cap    (operand_b_i),
-    .wrap64_getTop      (b_getTop_o));
+      .wrap64_getTop_cap  (operand_b_i),
+      .wrap64_getTop      (b_getTop_o));
 
 module_wrap64_setType module_wrap64_setType_a (
-  .wrap64_setType_cap     (operand_a_i),
-    .wrap64_setType_otype (a_setType_i),
-    .wrap64_setType       (a_setType_o));
+      .wrap64_setType_cap   (a_setType_cap_i),
+      .wrap64_setType_otype (a_setType_i),
+      .wrap64_setType       (a_setType_o));
 
 module_wrap64_setType module_wrap64_setType_b (
-  .wrap64_setType_cap     (operand_b_i),
-    .wrap64_setType_otype (b_setType_i),
-    .wrap64_setType       (b_setType_o));
+      .wrap64_setType_cap   (operand_b_i),
+      .wrap64_setType_otype (b_setType_i),
+      .wrap64_setType       (b_setType_o));
 
 module_wrap64_getPerms module_wrap64_getPerms_a (
-  .wrap64_getPerms_cap    (operand_a_i),
-    .wrap64_getPerms      (a_getPerms_o));
+      .wrap64_getPerms_cap  (operand_a_i),
+      .wrap64_getPerms      (a_getPerms_o));
 
 module_wrap64_getPerms module_wrap64_getPerms_b (
-  .wrap64_getPerms_cap    (operand_b_i),
-    .wrap64_getPerms      (b_getPerms_o));
+      .wrap64_getPerms_cap  (operand_b_i),
+      .wrap64_getPerms      (b_getPerms_o));
 
 
 module_wrap64_setPerms module_wrap64_setPerms_a (
-  .wrap64_setPerms_cap      (operand_a_i),
-    .wrap64_setPerms_perms  (a_setPerms_i),
-    .wrap64_setPerms        (a_setPerms_o));
-
+      .wrap64_setPerms_cap    (operand_a_i),
+      .wrap64_setPerms_perms  (a_setPerms_i),
+      .wrap64_setPerms        (a_setPerms_o));
 
 module_wrap64_setPerms module_wrap64_setPerms_b (
-  .wrap64_setPerms_cap      (operand_b_i),
-    .wrap64_setPerms_perms  (b_setPerms_i),
-    .wrap64_setPerms        (b_setPerms_o));
+      .wrap64_setPerms_cap    (operand_b_i),
+      .wrap64_setPerms_perms  (b_setPerms_i),
+      .wrap64_setPerms        (b_setPerms_o));
 
 module_wrap64_setFlags module_wrap64_setFlags_a (
-  .wrap64_setFlags_cap      (operand_a_i),
-    .wrap64_setFlags_flags  (a_setFlags_i),
-    .wrap64_setFlags        (a_setFlags_o));
+      .wrap64_setFlags_cap    (operand_a_i),
+      .wrap64_setFlags_flags  (a_setFlags_i),
+      .wrap64_setFlags        (a_setFlags_o));
 
 module_wrap64_setOffset module_wrap64_setOffset_a (
-  .wrap64_setOffset_cap     (operand_a_i),
-    .wrap64_setOffset_offset(a_setOffset_i),
-    .wrap64_setOffset       (a_setOffset_o));
+      .wrap64_setOffset_cap   (operand_a_i),
+      .wrap64_setOffset_offset(a_setOffset_i),
+      .wrap64_setOffset       (a_setOffset_o));
 
 module_wrap64_getBase module_getBase_a (
-    .wrap64_getBase_cap     (operand_a_i),
-    .wrap64_getBase         (a_getBase_o));
+      .wrap64_getBase_cap     (operand_a_i),
+      .wrap64_getBase         (a_getBase_o));
 
 module_wrap64_getBase module_getBase_b (
-    .wrap64_getBase_cap     (operand_b_i),
-    .wrap64_getBase         (b_getBase_o));
+      .wrap64_getBase_cap     (operand_b_i),
+      .wrap64_getBase         (b_getBase_o));
 
 module_wrap64_getOffset module_getOffset_a (
-  .wrap64_getOffset_cap     (operand_a_i),
-    .wrap64_getOffset       (a_getOffset_o));
+      .wrap64_getOffset_cap   (operand_a_i),
+      .wrap64_getOffset       (a_getOffset_o));
 
 module_wrap64_getOffset module_getOffset_b (
-  .wrap64_getOffset_cap     (operand_b_i),
-    .wrap64_getOffset       (b_getOffset_o));
-
+      .wrap64_getOffset_cap   (operand_b_i),
+      .wrap64_getOffset       (b_getOffset_o));
 
 module_wrap64_isValidCap module_wrap64_isValidCap_a (
-  .wrap64_isValidCap_cap    (operand_a_i),
-    .wrap64_isValidCap      (a_isValidCap_o));
+      .wrap64_isValidCap_cap  (operand_a_i),
+      .wrap64_isValidCap      (a_isValidCap_o));
 
 module_wrap64_isValidCap module_wrap64_isValidCap_b (
-  .wrap64_isValidCap_cap    (operand_b_i),
-    .wrap64_isValidCap      (b_isValidCap_o));
-
+      .wrap64_isValidCap_cap  (operand_b_i),
+      .wrap64_isValidCap      (b_isValidCap_o));
 
 module_wrap64_isSealed module_wrap64_isSealed_a (
-  .wrap64_isSealed_cap      (operand_a_i),
-    .wrap64_isSealed        (a_isSealed_o));
+      .wrap64_isSealed_cap    (operand_a_i),
+      .wrap64_isSealed        (a_isSealed_o));
 
 module_wrap64_isSealed module_wrap64_isSealed_b (
-  .wrap64_isSealed_cap      (operand_b_i),
-    .wrap64_isSealed        (b_isSealed_o));
-
+      .wrap64_isSealed_cap    (operand_b_i),
+      .wrap64_isSealed        (b_isSealed_o));
 
 module_wrap64_getType module_wrap64_getType_a (
-  .wrap64_getType_cap(operand_a_i),
-    .wrap64_getType(a_getType_o));
+      .wrap64_getType_cap     (operand_a_i),
+      .wrap64_getType         (a_getType_o));
 
 module_wrap64_getType module_wrap64_getType_b (
-  .wrap64_getType_cap(operand_b_i),
-    .wrap64_getType(b_getType_o));
-
+      .wrap64_getType_cap     (operand_b_i),
+      .wrap64_getType         (b_getType_o));
 
 module_wrap64_getLength module_getLength_a (
-  .wrap64_getLength_cap(operand_a_i),
-    .wrap64_getLength(a_getLength_o));
+      .wrap64_getLength_cap   (operand_a_i),
+      .wrap64_getLength       (a_getLength_o));
 
 module_wrap64_getFlags module_getFlags_a (
-  .wrap64_getFlags_cap(operand_a_i),
-    .wrap64_getFlags(a_getFlags_o));
+      .wrap64_getFlags_cap    (operand_a_i),
+      .wrap64_getFlags        (a_getFlags_o));
 
 module_wrap64_setValidCap module_wrap64_setValidCap_a (
-  .wrap64_setValidCap_cap(operand_a_i),
-    .wrap64_setValidCap_valid(a_setValidCap_i),
-    .wrap64_setValidCap(a_setValidCap_o));
+      .wrap64_setValidCap_cap   (operand_a_i),
+      .wrap64_setValidCap_valid (a_setValidCap_i),
+      .wrap64_setValidCap       (a_setValidCap_o));
 
 module_wrap64_setValidCap module_wrap64_setValidCap_b (
-  .wrap64_setValidCap_cap(operand_b_i),
-    .wrap64_setValidCap_valid(b_setValidCap_i),
-    .wrap64_setValidCap(b_setValidCap_o));
+      .wrap64_setValidCap_cap   (operand_b_i),
+      .wrap64_setValidCap_valid (b_setValidCap_i),
+      .wrap64_setValidCap       (b_setValidCap_o));
 
 module_wrap64_setAddr module_wrap64_setAddr_a (
-                .wrap64_setAddr_cap(operand_a_i),
-			    .wrap64_setAddr_addr(a_setAddr_i),
-			    .wrap64_setAddr(a_setAddr_o));
+      .wrap64_setAddr_cap       (operand_a_i),
+	  .wrap64_setAddr_addr      (a_setAddr_i),
+	  .wrap64_setAddr           (a_setAddr_o));
 
 module_wrap64_setAddr module_wrap64_setAddr_b (
-                .wrap64_setAddr_cap(operand_b_i),
-			    .wrap64_setAddr_addr(b_setAddr_i),
-			    .wrap64_setAddr(b_setAddr_o));
-
-
-
-
-
-
-
-
-
-
+      .wrap64_setAddr_cap   (operand_b_i),
+ 	  .wrap64_setAddr_addr  (b_setAddr_i),
+ 	  .wrap64_setAddr       (b_setAddr_o));
 
 
 
@@ -849,7 +864,6 @@ module_wrap64_setAddr module_wrap64_setAddr_b (
   // isValidCap would need to be &&'d with the negative of the ones above them
   // (ie a_isValidCap_o && !a_isSealed_o && a_CURSOR_o < a_isSealed_o)
   // this may not actually be needed because exceptions have priorities
-  // also need to have two vectors which hold exceptions: one for operand a and one for operand b
 
   // check for common violations
   always_comb begin
@@ -868,7 +882,6 @@ module_wrap64_setAddr module_wrap64_setAddr_b (
     if (b_isValidCap_o && b_isSealed_o)
       exceptions_b[SEAL_VIOLATION] = 1'b1;
 
-    // checks that the address is not smaller than the base
     if (a_getAddr_o < a_getBase_o)
       exceptions_a[LENGTH_VIOLATION] = 1'b1;
 
@@ -889,6 +902,12 @@ module_wrap64_setAddr module_wrap64_setAddr_b (
 
     if (!b_getPerms_o[`PERMIT_EXECUTE_INDEX])
       exceptions_b[PERMIT_EXECUTE_VIOLATION] = 1'b1;
+
+    if (!a_getPerms_o[`PERMIT_CCALL_INDEX])
+      exceptions_a[PERMIT_CCALL_VIOLATION] = 1'b1;
+
+    if (!b_getPerms_o[`PERMIT_CCALL_INDEX])
+      exceptions_b[PERMIT_CCALL_VIOLATION] = 1'b1;
 
   end
 endmodule

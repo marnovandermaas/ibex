@@ -99,6 +99,7 @@ module ibex_id_stage #(
     output ibex_defines::cheri_base_opcode_e       cheri_base_opcode_o,
     output ibex_defines::cheri_threeop_funct7_e    cheri_threeop_opcode_o,
     output ibex_defines::cheri_s_a_d_funct5_e      cheri_sad_opcode_o,
+    output ibex_defines::cheri_ccall_e      cheri_ccall_type_o,
     output logic [`CAP_SIZE-1:0]      cheri_operand_a_o,
     output logic [`CAP_SIZE-1:0]      cheri_operand_b_o,
 
@@ -613,6 +614,7 @@ module_wrap64_getAddr module_getAddr_z (
       .cheri_base_opcode_o(cheri_base_opcode_o),
       .cheri_threeop_opcode_o(cheri_threeop_opcode_o),
       .cheri_sad_opcode_o(cheri_sad_opcode_o),
+      .cheri_ccall_type_o(cheri_ccall_type_o),
 
       // CHERI operand selection
       .cheri_op_a_mux_sel_o(cheri_op_a_mux_sel),

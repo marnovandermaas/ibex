@@ -53,6 +53,7 @@ module ibex_ex_block #(
     input ibex_defines::cheri_base_opcode_e       cheri_base_opcode_i,
     input ibex_defines::cheri_threeop_funct7_e    cheri_threeop_opcode_i,
     input ibex_defines::cheri_s_a_d_funct5_e      cheri_sad_opcode_i,
+    input ibex_defines::cheri_ccall_e      cheri_ccall_type_i,
     input logic [`CAP_SIZE-1:0]      cheri_operand_a_i,
     input logic [`CAP_SIZE-1:0]      cheri_operand_b_i,
 
@@ -158,6 +159,7 @@ module ibex_ex_block #(
       .base_opcode_i(cheri_base_opcode_i),
       .threeop_opcode_i(cheri_threeop_opcode_i),
       .sad_opcode_i(cheri_sad_opcode_i),
+      .ccall_type_i(cheri_ccall_type_i),
 
       // TODO rest of connections
       .operand_a_i(cheri_operand_a_i),
