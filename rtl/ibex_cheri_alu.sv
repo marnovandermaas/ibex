@@ -40,6 +40,8 @@
 `define PERMIT_EXECUTE_INDEX 1
 `define PERMIT_CCALL_INDEX 8
 `define MIN_INSTR_BYTES 2
+// TODO change this back to 'hb, changed here to agree with piccolo
+`define MAX_OTYPE `INTEGER_SIZE'hc
 
 
 /*
@@ -296,7 +298,8 @@ logic [`CAP_SIZE:0] b_setAddr_o;
                            |( exceptions_b[SEAL_VIOLATION]         ) << SEAL_VIOLATION
                            |( exceptions_b[LENGTH_VIOLATION]       ) << LENGTH_VIOLATION
                            |( b_getAddr_o >= b_getTop_o            ) << LENGTH_VIOLATION
-                           |( b_getAddr_o > {`OTYPE_SIZE{1'b1}}    ) << LENGTH_VIOLATION //-1 means unsealed
+                           // TODO use validAsType when it gets fixed
+                           |( b_getAddr_o > `MAX_OTYPE             ) << LENGTH_VIOLATION //-1 means unsealed
                            |( exceptions_b[PERMIT_SEAL_VIOLATION]  ) << PERMIT_SEAL_VIOLATION;
             //$display("cseal output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
@@ -487,11 +490,12 @@ logic [`CAP_SIZE:0] b_setAddr_o;
                             |((exceptions_a[SEAL_VIOLATION] && !(!b_isValidCap_o || b_getAddr_o == {`INTEGER_SIZE{1'b1}}))
                                << SEAL_VIOLATION);
 
-            exceptions_b_o =( exceptions_b[SEAL_VIOLATION]        && b_isValidCap_o && b_getAddr_o == {`INTEGER_SIZE{1'b1}} ) << SEAL_VIOLATION
-                           |( exceptions_b[PERMIT_SEAL_VIOLATION] && b_isValidCap_o && b_getAddr_o == {`INTEGER_SIZE{1'b1}} ) << PERMIT_SEAL_VIOLATION
-                           |( exceptions_b[LENGTH_VIOLATION]      && b_isValidCap_o && b_getAddr_o == {`INTEGER_SIZE{1'b1}} ) << LENGTH_VIOLATION
-                           |( b_getAddr_o >= b_getTop_o           && b_isValidCap_o && b_getAddr_o == {`INTEGER_SIZE{1'b1}} ) << LENGTH_VIOLATION
-                           |( b_getAddr_o > {`OTYPE_SIZE{1'b1}}   && b_isValidCap_o && b_getAddr_o == {`INTEGER_SIZE{1'b1}} ) << LENGTH_VIOLATION;
+            exceptions_b_o =( exceptions_b[SEAL_VIOLATION]        && b_isValidCap_o && b_getAddr_o != {`INTEGER_SIZE{1'b1}} ) << SEAL_VIOLATION
+                           |( exceptions_b[PERMIT_SEAL_VIOLATION] && b_isValidCap_o && b_getAddr_o != {`INTEGER_SIZE{1'b1}} ) << PERMIT_SEAL_VIOLATION
+                           |( exceptions_b[LENGTH_VIOLATION]      && b_isValidCap_o && b_getAddr_o != {`INTEGER_SIZE{1'b1}} ) << LENGTH_VIOLATION
+                           // TODO use validAsType when it gets fixed
+                           |( b_getAddr_o >= b_getTop_o           && b_isValidCap_o && b_getAddr_o != {`INTEGER_SIZE{1'b1}} ) << LENGTH_VIOLATION
+                           |( b_getAddr_o > `MAX_OTYPE            && b_isValidCap_o && b_getAddr_o != {`INTEGER_SIZE{1'b1}} ) << LENGTH_VIOLATION;
             //$display("ccseal output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
