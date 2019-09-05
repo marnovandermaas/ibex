@@ -1,6 +1,6 @@
 
 module ibex_cheri_tag_mem #(
-  parameter TAG_MEM_SIZE = 4096
+  parameter TAG_MEM_SIZE = 128000
 ) (
     input logic clk_i,
     input logic rst_ni,
@@ -11,9 +11,10 @@ module ibex_cheri_tag_mem #(
     output logic readdata_o
 );
 
+  /* verilator lint_off WIDTHCONCAT */
   logic [TAG_MEM_SIZE-1:0] tags;
 
-  always_ff @(posedge clk_i or negedge rst_ni) begin
+  always_ff @(posedge clk_i) begin
     if (!rst_ni) begin
       //for (int i = 0; i < TAG_MEM_SIZE; i++) begin
       //  tags[i] <= '0;
@@ -27,5 +28,6 @@ module ibex_cheri_tag_mem #(
       end
     end
   end
+/* verilator lint_on WIDTHCONCAT */
 endmodule
 

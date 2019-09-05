@@ -271,8 +271,6 @@ uint8_t serv_socket_putN(unsigned long long ptr, int nbytes, unsigned int* data)
     FD_ZERO(&fds);
     FD_SET(s->conn, &fds);
     while (count < nbytes) {
-      printf("still need to send %d bytes", nbytes-count);
-      fflush(stdout);
       int res = select(s->conn+1, NULL, &fds, NULL, NULL);
       assert(res >= 0);
       res = write(s->conn, &bytes[count], nbytes-count);

@@ -118,11 +118,11 @@ module ibex_core_avalon #(
     logic         data_gnt_i;
 
   ibex_cheri_tag_mem #(
-      .TAG_MEM_SIZE(4096)
+      .TAG_MEM_SIZE(256000)
   ) tag_mem (
       .clk_i(clk_i),
       .rst_ni(!rst_i),
-      .address_i(data_addr_o[31:3]),
+      .address_i(data_addr_o[28:3]),
       .we_i(data_gnt_i && data_we_o),
       // TODO parameterize this 64
       .writedata_i(data_wtag_o),
@@ -231,7 +231,7 @@ avalon_ibex_translator_main translator_main (
 
         // Debug interface
         .debug_req_i    (debug_req_i),
-        
+
         // RISC-V Formal Interface
         // Does not comply with the coding standards of _i/_o suffixes, but follows
         // the convention of RISC-V Formal Interface Specification.

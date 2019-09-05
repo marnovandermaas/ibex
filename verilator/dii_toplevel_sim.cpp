@@ -14,7 +14,7 @@
 
 #define MEM_BASE_BYTES 0x80000000
 #define MEM_BASE_WORDS 0x20000000
-#define MEM_SIZE_BYTES 0x2000000
+#define MEM_SIZE_BYTES 0x10000
 #define MEM_SIZE_WORDS 0x2000000/4
 
 
@@ -55,25 +55,6 @@ struct RVFI_DII_Instruction_Packet {
 };
 
 double main_time = 0;
-
-unsigned int belu[] = {
-    0x00000000,
-    0x000000ff,
-    0x0000ff00,
-    0x0000ffff,
-    0x00ff0000,
-    0x00ff00ff,
-    0x00ffff00,
-    0x00ffffff,
-    0xff000000,
-    0xff0000ff,
-    0xff00ff00,
-    0xff00ffff,
-    0xffff0000,
-    0xffff00ff,
-    0xffffff00,
-    0xffffffff
-};
 
 double sc_time_stamp() {
     return main_time;
@@ -144,52 +125,28 @@ int main(int argc, char** argv, char** env) {
             sendReturnTrace(returntrace, socket);
         }
 
-        // set up a packet and try to receive packets if the number of instructions that we've put in is
-        // equal to the number of instructions we've received from TestRIG
+
         RVFI_DII_Instruction_Packet *packet;
-        //std::cout << "receive" << std::endl;
         while (in_count >= received) {
             // try to receive a packet
-            serv_socket_getN((unsigned int *) recbuf, socket, sizeof(RVFI_DII_Instruction_Packet));
 
-            // the last byte received will be 0 if our attempt to receive a packet was successful
-            if (recbuf[8] == 0) {
-                //std::cout << "received this" << std::endl;
-                //for (int i = 0; i < sizeof(recbuf); i++) {
-                //    std::cout << (int) recbuf[i] << " ";
-                //}
-                //std::cout << std::endl;
+                serv_socket_getN((unsigned int *) recbuf, socket, sizeof(RVFI_DII_Instruction_Packet));
 
-                packet = (RVFI_DII_Instruction_Packet *) recbuf;
+                // the last byte received will be 0 if our attempt to receive a packet was successful
+                if (recbuf[8] == 0) {
+                    packet = (RVFI_DII_Instruction_Packet *) recbuf;
 
-                //std::cout << "time: " << (int) packet->dii_time << std::endl;
-                //std::cout << "cmd: " << (int) packet->dii_cmd << std::endl;
-                //std::cout << "insn: 0x" << std::hex <<  (int) packet->dii_insn << std::endl;
+                    instructions.push_back(*packet);
+                    received++;
+                    break;
+                }
 
-                instructions.push_back(*packet);
-                received++;
-                break;
-            }
-
-            // sleep for 0.1ms before trying to receive another instruction
-            usleep(100);
+                // sleep for 0.1ms before trying to receive another instruction
+                usleep(100);
         }
 
-
         // need to clock the core while there are still instructions in the buffer
-        std::cout << "clock" << std::endl;
         if ((in_count <= received) && received > 0 && ((in_count - out_count > 0) || in_count == 0 || (out_count == in_count && received > in_count))) {
-
-            //std::cout << "in_count: " << in_count << " out_count: " << out_count << " diff: " << in_count - out_count << std::endl;
-            /*
-            if (in_count - out_count > 0) {
-                for (int i = out_count + 1; i <= in_count; i++) {
-                    std::cout << "next " << i << ": " << std::hex << instructions[i].dii_insn << std::endl;
-                }
-            }
-            */
-
-
             // read rvfi data and add packet to list of packets to send
             // the condition to read data here is that there is an rvfi valid signal
             // this deals with counting instructions that the core has finished executing
@@ -203,7 +160,6 @@ int main(int argc, char** argv, char** env) {
 
             // detect imiss in order to replay instructions so they don't get lost
             if (top->perf_imiss_o && in_count > out_count) {
-                //std::cout << "imiss detected" << std::endl;
                 // this will need to be reworked
                 // currently, in order for this to work we need to remove illegal_insn from the assignment
                 // to rvfi_trap since when the core is first started the instruction data is garbage so
@@ -211,13 +167,11 @@ int main(int argc, char** argv, char** env) {
                 if (top->rvfi_valid && top->rvfi_trap) {
                     // if there has been a trap, then we know that we just tried to do a load/store
                     // we need to go back to out_count
-                    // THIS BREAKS ONCE CHERI IS ADDED
                     // CHERI USES THE TRAP SIGNAL A LOT BUT ITS TRAPS TAKE FEWER CYCLES TO RECOVER FROM
                     //in_count = out_count + ((top->rvfi_insn & 0x0000007f) == 0x0000005b ? 1 : 0);
                     in_count = out_count + (((top->rvfi_insn & 0x0000007f) == 0x0000005b)
                                            && ((top->rvfi_insn & 0xfff07000) != 0xfec00000) ? 0 : 0);
                 } else {
-                    //std::cout << "cmd: " << (instructions[out_count].dii_cmd ? "instr" : "rst") << std::endl;
                     if (!instructions[out_count].dii_cmd) {
                         // the last instruction we saw coming out was a reset
                         // this means that we tried to do a jump straight away, and it will only come out of
@@ -239,9 +193,7 @@ int main(int argc, char** argv, char** env) {
             if (instructions[in_count].dii_cmd) {
                 if (top->avm_instr_read) {
                     // if we have instructions to feed into it, then set readdatavalid and waitrequest accordingly
-                    //std::cout << "checking instruction in_count: " << in_count << " received: " << received << std::endl;
                     if (received > in_count) {
-                        //std::cout << "inserting instruction @@@@@@@@@@@@@@@@@@@@" << std::endl;
                         top->avm_instr_readdatavalid = 1;
                         top->avm_instr_waitrequest = 0;
                         in_count++;
@@ -264,6 +216,8 @@ int main(int argc, char** argv, char** env) {
                     for (int i = 0; i < MEM_SIZE_BYTES; i++) {
                         memory[i] = 0;
                     }
+
+                    std::cout << "reset" << std::endl;
 
                     in_count++;
                 }
@@ -293,9 +247,7 @@ int main(int argc, char** argv, char** env) {
                     // the core tried to read from an address outside the specified range
                     // set the signals appropriately
                     top->avm_main_response = 0b11;
-                    // TODO comment this
-                    // TODO this belu is no longer accurate
-                    top->avm_main_readdata = 0xdeadbeefdeadbeef & belu[top->avm_main_byteenable & 0xf];
+                    top->avm_main_readdata = 0xdeadbeefdeadbeef;
                     top->avm_main_readdatavalid = 1;
                     std::cout << "out of bounds memory access - address: 0x" << std::hex << address << std::endl;
                 } else {
@@ -303,8 +255,7 @@ int main(int argc, char** argv, char** env) {
                     // we need to get the correct data from memory
 
                     // translate the address so it is between 0x0 and 0x00003fff
-                    // TODO change this to a #defined value
-                    address = address & 0x01ffffff;
+                    address = address - MEM_BASE_BYTES;
 
                     // we want to start with the highest byte address for this word since our
                     // memory is little endian

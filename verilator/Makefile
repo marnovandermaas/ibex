@@ -28,6 +28,7 @@ FILELIST=../rtl/avalon/ibex_core_avalon.sv \
 			../rtl/cheri/*
 
 TARGET=ibex_core_avalon
+SIMFILE_NON=toplevel_sim.cpp
 SIMFILE=dii_toplevel_sim.cpp
 LIBS=socket_packet_utils.c
 VERILATOR_INCLUDE=/usr/local/share/verilator/include
@@ -36,16 +37,24 @@ default: all
 
 all: verilator compile
 trace: verilator-trace compile
+non_dii: verilator-non compile
+non_dii_trace: verilator-trace-non compile
 
-# TODO remove NOWIDTH
+#TODO remove no-WIDTH
 verilator:
-	verilator +define+RVFI +define+DII -Wno-WIDTH -Wno-UNOPTFLAT --cc $(FILELIST) --exe $(SIMFILE) $(LIBS) --top-module ibex_core_avalon
+	verilator +define+RVFI -Wno-WIDTH -Wno-UNOPTFLAT +define+DII --cc $(FILELIST) --exe $(SIMFILE) $(LIBS) --top-module ibex_core_avalon
+
+verilator-non:
+	verilator -CFLAGS "-pthread" -LDFLAGS "-pthread"  +define+RVFI -Wno-WIDTH -Wno-UNOPTFLAT --profile-cfuncs --cc $(FILELIST) --exe $(SIMFILE_NON) $(LIBS) --top-module ibex_core_avalon
+
+verilator-trace-non:
+	verilator -CFLAGS "-pthread" -LDFLAGS "-pthread"  +define+RVFI -DTRACE -Wno-WIDTH -Wno-UNOPTFLAT --trace --cc $(FILELIST) --exe $(SIMFILE_NON) $(LIBS) --top-module ibex_core_avalon
 
 verilator-trace:
 	verilator +define+RVFI +define+DII -DTRACE -Wno-WIDTH -Wno-UNOPTFLAT --trace --cc $(FILELIST) --exe $(SIMFILE) $(LIBS) --top-module ibex_core_avalon
 
 compile:
-	make -j -C obj_dir -f V$(TARGET).mk V$(TARGET) CFG_CXXFLAGS_NO_UNUSED="-std=gnu++11 -Wno-sign-compare -Wno-uninitialized -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable -Wno-shadow"
+	make -j -C obj_dir -f V$(TARGET).mk V$(TARGET) OPT=-DVL_DEBUG CFG_CXXFLAGS_NO_UNUSED="-std=gnu++11 -Wno-sign-compare -Wno-uninitialized -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable -Wno-shadow"
 
 
 clean:
