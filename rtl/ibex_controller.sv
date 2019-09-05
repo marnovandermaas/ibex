@@ -572,9 +572,16 @@ module ibex_controller (
 
 
 
-  assign cheri_exc_o = |cheri_exc_a_i || |cheri_exc_b_i || |cheri_exc_scr_i || |cheri_exc_mem_i || |cheri_exc_instr_i;
+  assign cheri_exc_o =  |cheri_exc_a_i
+                     || |cheri_exc_b_i
+                     || |cheri_exc_scr_i
+                     || |cheri_exc_mem_i
+                     || |cheri_exc_instr_i;
 
   always_comb begin
+    cheri_cause     = CAUSE_NONE;
+    csr_reg_to_save = REG_A;
+
     // TODO check for AccessSystemRegs
     if ('0/*TODO replace with check for ASR*/) begin
 
@@ -727,6 +734,8 @@ module ibex_controller (
       csr_reg_to_save = REG_B;
    end
   end
+
+  // TODO memory checks and instruction fetch checks
 
 
 endmodule

@@ -23,6 +23,7 @@
 `define CAP_SIZE 93
 `define ALMIGHTY_OFFSET 93'h100000020003FFDF690003F0
 `define ALMIGHTY_OFFSET_TESTRIG 93'h120000000083FFDF690003F0
+`define ALMIGHTY_OFFSET_RUN 93'h130000000083FFDF690003F0
 `define ALMIGHTY_CAP 93'h100000000003FFDF690003F0
 
 /**
@@ -67,8 +68,8 @@ module ibex_if_stage #(
 
     // these have become PCCs, so we need to pass a PC for RVFI purposes.
     // this is done using the pc_next
-    output logic [`CAP_SIZE-1:0]               pc_if_o,
-    output logic [`CAP_SIZE-1:0]               pc_id_o,
+    output logic [`CAP_SIZE-1:0]      pc_if_o,
+    output logic [`CAP_SIZE-1:0]      pc_id_o,
 
     // Forwarding ports - control signals
     input  logic                      instr_valid_clear_i,      // clear instr valid bit in IF-ID
@@ -115,11 +116,13 @@ module ibex_if_stage #(
   // prefetch buffer related signals
   logic              prefetch_busy;
   logic              branch_req;
-  logic       [`CAP_SIZE-1:0] fetch_addr_n;
+  logic [`CAP_SIZE-1:0] fetch_addr_n;
 
   logic              fetch_valid;
   logic              fetch_ready;
   logic       [31:0] fetch_rdata;
+
+  // PCC of instruction that is coming from the prefetcher
   logic       [`CAP_SIZE-1:0] fetch_addr;
 
   logic       [`CAP_SIZE-1:0] exc_pc;
@@ -140,8 +143,25 @@ module ibex_if_stage #(
   // the target capability to set pcc to
   logic [`CAP_SIZE-1:0] jump_target;
 
+
+
+  // functions used in this module
+  logic [`CAP_SIZE-1:0] scr_mtcc_setOffset_i;
+  logic [`CAP_SIZE-1:0] scr_mtcc_setOffset_o;
+
+  // TODO rename this signal - not very informative ATM
+  logic [`CAP_SIZE:0]   pc_id_o_setOffset_o;
+
+  logic [`CAP_SIZE-1:0]   scr_mtcc_getOffset_o;
+  logic [`CAP_SIZE-1:0] fetch_addr_n_getOffset_o;
+
+
+
+
+  // set jump target depending on whether we're doing a capability jump or not
   assign jump_target = cap_jump_i ? jump_target_ex_i : pc_id_o_setOffset_o;
 
+  // TODO review this signal - feels like bad coding practices
   assign curr_pc_cap_d = branch_req ? fetch_addr_n : curr_pc_cap_q;
   assign instr_cap_o   = curr_pc_cap_d;
 
@@ -152,47 +172,56 @@ module ibex_if_stage #(
   assign unused_irq_bit = irq_id[5];   // MSB distinguishes interrupts from exceptions
 
   // trap-vector base address, mtvec.MODE set to vectored
-  assign csr_mtvec_o = {boot_addr_i[31:8], 6'b0, 2'b00};
+  // assign csr_mtvec_o = {boot_addr_i[31:8], 6'b0, 2'b00};
+  // temporarily set to direct
+  assign csr_mtvec_o = {boot_addr_i[31:8], 6'b0, 2'b01};
+
+
 
   // exception PC selection mux
   always_comb begin : exc_pc_mux
+    scr_mtcc_setOffset_i = '0;
     unique case (exc_pc_mux_i)
-      //EXC_PC_EXC:     exc_pc = { boot_addr_i[31:8], 8'h00                    };
       EXC_PC_EXC: begin
-        scr_mtcc_setOffset_i = {scr_mtcc_i_getOffset_o[31:2], 2'b00};
-        exc_pc = scr_mtcc_postOffset;
+        scr_mtcc_setOffset_i = {scr_mtcc_getOffset_o[31:2], 2'b00};
+        exc_pc = scr_mtcc_setOffset_o;
       end
-      //EXC_PC_IRQ:     exc_pc = { boot_addr_i[31:8], 1'b0, irq_id[4:0], 2'b00 };
+
       EXC_PC_IRQ: begin
-        scr_mtcc_setOffset_i = scr_mtcc_i_getOffset_o[31:7] + {irq_id[4:0] , 2'b00};
-        exc_pc = scr_mtcc_postOffset;
+        scr_mtcc_setOffset_i = scr_mtcc_getOffset_o[31:7] + {irq_id[4:0] , 2'b00};
+        exc_pc = scr_mtcc_setOffset_o;
       end
-      //EXC_PC_DBD:     exc_pc = DmHaltAddr;
-      //EXC_PC_DBG_EXC: exc_pc = DmExceptionAddr;
+
+      // TODO make these give the right PCC (passed in as signals)
       EXC_PC_DBD:     exc_pc = `ALMIGHTY_CAP;
       EXC_PC_DBG_EXC: exc_pc = `ALMIGHTY_CAP;
       default:        exc_pc = 'X;
     endcase
   end
 
+
+
   // fetch address selection mux
   always_comb begin : fetch_addr_mux
     unique case (pc_mux_i)
-      //PC_BOOT: fetch_addr_n = { boot_addr_i[31:8], 8'h00 };
       `ifdef DII
+      // used for TestRIG
       PC_BOOT: fetch_addr_n = `ALMIGHTY_OFFSET_TESTRIG;
       `else
-      PC_BOOT: fetch_addr_n = `ALMIGHTY_CAP;
+      // used for running software in simulation - address is 0xC0000000
+      PC_BOOT: fetch_addr_n = `ALMIGHTY_OFFSET_RUN;
       `endif
       PC_JUMP: fetch_addr_n = jump_target;
       PC_EXC:  fetch_addr_n = exc_pc;                       // set PC to exception handler
-      // TODO need to change this back to capability stuff
       PC_ERET: fetch_addr_n = scr_mepcc_i;                  // restore PC when returning from EXC
+      // TODO implement depcc
       PC_DRET: fetch_addr_n = csr_depc_i;
       default: fetch_addr_n = 'X;
     endcase
 
-    pc_next = pc_mux_i == PC_BOOT ? {mtcc_getAddr_o[31:2], 2'b00} : fetch_addr_n_getAddr_o;
+    // set the pc that is going to get reported by RVFI after jumping
+    // TODO take other mux values into account
+    pc_next = pc_mux_i == PC_BOOT ? {scr_mtcc_getOffset_o[31:2], 2'b00} : fetch_addr_n_getOffset_o;
   end
 
   // prefetch buffer, caches a fixed number of instructions
@@ -291,9 +320,12 @@ module ibex_if_stage #(
       .illegal_instr_o ( illegal_c_insn          )
   );
 
+
+
   // IF-ID pipeline registers, frozen when the ID stage is stalled
   assign if_id_pipe_reg_we = have_instr & id_in_ready_i;
 
+  // write out next instruction to ID stage when it is ready
   always_ff @(posedge clk_i or negedge rst_ni) begin : if_id_pipeline_regs
     if (!rst_ni) begin
       instr_new_id_o             <= 1'b0;
@@ -305,6 +337,7 @@ module ibex_if_stage #(
       pc_id_o                    <= '0;
       curr_pc_cap_q <= `ALMIGHTY_OFFSET_TESTRIG;
     end else begin
+      // TODO move this somewhere else? doesn't fit into the rest of this always_ff block
       curr_pc_cap_q <= curr_pc_cap_d;
       instr_new_id_o             <= if_id_pipe_reg_we;
       if (if_id_pipe_reg_we) begin
@@ -323,34 +356,23 @@ module ibex_if_stage #(
 
 
 
-logic [`CAP_SIZE-1:0] scr_mtcc_postOffset;
-logic [`CAP_SIZE-1:0] scr_mtcc_i_getOffset_o;
-module_wrap64_getOffset module_getOffset_scr (
-  .wrap64_getOffset_cap(scr_mtcc_i),
-    .wrap64_getOffset(scr_mtcc_i_getOffset_o));
+  module_wrap64_getOffset module_getOffset_scr_mtcc (
+        .wrap64_getOffset_cap            ( scr_mtcc_i           ),
+        .wrap64_getOffset                ( scr_mtcc_getOffset_o ));
 
-logic [`CAP_SIZE-1:0] scr_mtcc_setOffset_i;
-module_wrap64_setOffset module_setOffset_scr (
-  .wrap64_setOffset_cap(scr_mtcc_i),
-    .wrap64_setOffset_offset(scr_mtcc_setOffset_i),
-    .wrap64_setOffset(scr_mtcc_postOffset));
+  module_wrap64_setOffset module_setOffset_scr_mtcc (
+        .wrap64_setOffset_cap            ( scr_mtcc_i           ),
+        .wrap64_setOffset_offset         ( scr_mtcc_setOffset_i ),
+        .wrap64_setOffset                ( scr_mtcc_setOffset_o ));
 
-// TODO remove
-logic [`CAP_SIZE-1:0] mtcc_getAddr_o;
-module_wrap64_getAddr module_getAddr_mtcc (
-    .wrap64_getAddr_cap(scr_mtcc_i),
-    .wrap64_getAddr(mtcc_getAddr_o));
+  module_wrap64_getOffset module_getOffset_fetch_addr_n (
+        .wrap64_getOffset_cap            ( fetch_addr_n             ),
+        .wrap64_getOffset                ( fetch_addr_n_getOffset_o ));
 
-logic [`CAP_SIZE-1:0] fetch_addr_n_getAddr_o;
-module_wrap64_getAddr module_getAddr_fetch_addr_n (
-    .wrap64_getAddr_cap(fetch_addr_n),
-    .wrap64_getAddr(fetch_addr_n_getAddr_o));
-
-logic [`CAP_SIZE:0] pc_id_o_setOffset_o;
-module_wrap64_setOffset module_wrap64_setOffset_pc_id_o (
-  .wrap64_setOffset_cap(pc_id_o),
-    .wrap64_setOffset_offset({jump_target_ex_i[31:1], 1'b0}),
-    .wrap64_setOffset(pc_id_o_setOffset_o));
+  module_wrap64_setOffset module_setOffset_pc_id_o (
+        .wrap64_setOffset_cap            ( pc_id_o                        ),
+        .wrap64_setOffset_offset         ( {jump_target_ex_i[31:1], 1'b0} ),
+        .wrap64_setOffset                ( pc_id_o_setOffset_o            ));
 
 
 

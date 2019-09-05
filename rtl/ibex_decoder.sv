@@ -79,20 +79,26 @@ module ibex_decoder #(
     output ibex_defines::md_op_e     multdiv_operator_o,
     output logic [1:0]               multdiv_signed_mode_o,
 
-    // CHERI
-    output logic                     cheri_en_o,
-    output ibex_defines::cheri_base_opcode_e       cheri_base_opcode_o,
-    output ibex_defines::cheri_threeop_funct7_e    cheri_threeop_opcode_o,
-    output ibex_defines::cheri_s_a_d_funct5_e      cheri_sad_opcode_o,
-    output ibex_defines::c_op_a_sel_e          cheri_op_a_mux_sel_o,
-    output ibex_defines::c_op_b_sel_e          cheri_op_b_mux_sel_o,
-    output ibex_defines::cheri_imm_b_sel_e          cheri_imm_b_mux_sel_o,
-    output logic cheri_a_en_o,
-    output logic cheri_b_en_o,
-    output ibex_defines::cheri_ccall_e cheri_ccall_type_o,
-    // TODO find this a new home
-    input logic cap_mode_i,
-    output logic use_cap_base_o,
+    // CHERI operation selection
+    output logic                                  cheri_en_o,
+    output ibex_defines::cheri_base_opcode_e      cheri_base_opcode_o,
+    output ibex_defines::cheri_threeop_funct7_e   cheri_threeop_opcode_o,
+    output ibex_defines::cheri_s_a_d_funct5_e     cheri_sad_opcode_o,
+    output ibex_defines::cheri_ccall_e            cheri_ccall_type_o,
+
+    // whether we're in capability mode or not
+    input  logic                                  cap_mode_i,
+
+    // whether the offset for this memory access should be relative to
+    // the capability base or the capability address
+    output logic                                  use_cap_base_o,
+
+    // CHERI operand selection & enable
+    output ibex_defines::c_op_a_sel_e             cheri_op_a_mux_sel_o,
+    output ibex_defines::c_op_b_sel_e             cheri_op_b_mux_sel_o,
+    output ibex_defines::cheri_imm_b_sel_e        cheri_imm_b_mux_sel_o,
+    output logic                                  cheri_a_en_o,
+    output logic                                  cheri_b_en_o,
 
     // CSRs
     output logic                     csr_access_o,          // access to CSR
@@ -101,7 +107,7 @@ module ibex_decoder #(
 
     // SCRs
     output logic scr_access_o,
-    output ibex_defines::scr_op_e scr_op_o,
+    output ibex_defines::scr_op_e    scr_op_o,
 
     // LSU
     output logic                     data_req_o,            // start transaction to data memory
@@ -134,17 +140,18 @@ module ibex_decoder #(
 
   opcode_e     opcode;
 
-  cheri_base_opcode_e cheri_base_opcode;
+  cheri_base_opcode_e    cheri_base_opcode;
   cheri_threeop_funct7_e cheri_threeop_opcode;
-  cheri_s_a_d_funct5_e cheri_sad_opcode;
+  cheri_s_a_d_funct5_e   cheri_sad_opcode;
 
 
-  assign cheri_base_opcode = cheri_base_opcode_e'(instr[14:12]);
-  assign cheri_threeop_opcode = cheri_threeop_funct7_e'(instr[31:25]);
-  assign cheri_sad_opcode = cheri_s_a_d_funct5_e'(instr[24:20]);
 
 
   assign instr = instr_rdata_i;
+
+  assign cheri_base_opcode    = cheri_base_opcode_e'   (instr[14:12]);
+  assign cheri_threeop_opcode = cheri_threeop_funct7_e'(instr[31:25]);
+  assign cheri_sad_opcode     = cheri_s_a_d_funct5_e'  (instr[24:20]);
 
   //////////////////////////////////////
   // Register and immediate selection //
@@ -165,14 +172,14 @@ module ibex_decoder #(
   assign regfile_raddr_b_o = instr[`REG_S2]; // rs2
 
   // destination register
-  //assign regfile_waddr_o   = instr[`REG_D]; // rd
-  // need to check if we're doing a CCALLFAST
+  // need to check if we're doing a CCALLFAST, since these are the bits that contain the selector
   assign regfile_waddr_o   = (cheri_ccall_type_o == CCALL_CCALLFAST_CYCLE2) ? 5'd31
                                                                             : instr[`REG_D]; // rd
 
   ////////////////////
   // Register check //
   ////////////////////
+  generate
   if (RV32E) begin
     assign illegal_reg_rv32e = ((regfile_raddr_a_o[4] && (alu_op_a_mux_sel_o == OP_A_REG_A)) ||
                                 (regfile_raddr_b_o[4] && (alu_op_b_mux_sel_o == OP_B_REG_B)) ||
@@ -180,6 +187,7 @@ module ibex_decoder #(
   end else begin
     assign illegal_reg_rv32e = 1'b0;
   end
+  endgenerate
 
   ///////////////////////
   // CSR operand check //
@@ -198,20 +206,6 @@ module ibex_decoder #(
   /////////////
   // Decoder //
   /////////////
-
-  /* TODO: need to tell whatever is reading from registers whether it should pass the register value
-   through a getAddr (if the value is an integer) or not (if it's a capability)
-   This isn't needed if not using CHERI, so we'll want to wrap them with `ifdefs
-      Can do this at least two ways:
-        I edit this block and at every instruction, i can add an `ifdef CHERI to wrap these values
-          This means that there are many `ifdefs throughout the next always_comb block
-        I add in a new always_comb block at the end that is completely wrapped in an `ifdef CHERI
-          The new block is then responsible solely for setting the value described above which
-          tells the reader whether it needs to pass it through the getAddr
-          In addition if I add in this new block, then I can move the check for opcode_CHERI into it,
-          but then there are competing writes to illegal_insn since the original block doesn't recognise
-          CHERI and hence will say it's an illegal instruction
-  */
   always_comb begin
     jump_in_dec_o               = 1'b0;
     jump_set_o                  = 1'b0;
@@ -229,18 +223,18 @@ module ibex_decoder #(
     multdiv_signed_mode_o       = 2'b00;
 
     cheri_en_o                  = 1'b0;
-    cheri_op_a_mux_sel_o = CHERI_OP_A_REG_NUM;
-    cheri_op_b_mux_sel_o = CHERI_OP_B_REG_NUM;
+    cheri_a_en_o                = 1'b0;
+    cheri_b_en_o                = 1'b0;
+    cheri_op_a_mux_sel_o        = CHERI_OP_A_REG_NUM;
+    cheri_op_b_mux_sel_o        = CHERI_OP_B_REG_NUM;
     cheri_imm_b_mux_sel_o       = CHERI_IMM_B_I;
-    cheri_a_en_o = 1'b0;
-    cheri_b_en_o = 1'b0;
-    cheri_base_opcode_o = cheri_base_opcode;
-    cheri_threeop_opcode_o = cheri_threeop_opcode;
-    cheri_sad_opcode_o = cheri_sad_opcode;
-    cheri_ccall_type_o = CCALL_CCALL;
-    use_cap_base_o = 1'b0;
+    cheri_base_opcode_o         = cheri_base_opcode;
+    cheri_threeop_opcode_o      = cheri_threeop_opcode;
+    cheri_sad_opcode_o          = cheri_sad_opcode;
+    cheri_ccall_type_o          = CCALL_CCALL;
 
-    mem_ddc_relative_o = '0;
+    use_cap_base_o              = 1'b0;
+    mem_ddc_relative_o          = 1'b0;
 
     regfile_wdata_sel_o         = RF_WD_EX;
     regfile_we                  = 1'b0;
@@ -250,15 +244,15 @@ module ibex_decoder #(
     csr_illegal                 = 1'b0;
     csr_op                      = CSR_OP_READ;
 
-    scr_access_o = 1'b0;
-    scr_op_o = SCR_NONE;
+    scr_access_o                = 1'b0;
+    scr_op_o                    = SCR_NONE;
 
     data_we_o                   = 1'b0;
     data_type_o                 = 2'b00;
     data_sign_extension_o       = 1'b0;
     data_reg_offset_o           = 2'b00;
     data_req_o                  = 1'b0;
-    mem_cap_access_o = 1'b0;
+    mem_cap_access_o            = 1'b0;
 
     illegal_insn                = 1'b0;
     ebrk_insn_o                 = 1'b0;
@@ -349,13 +343,13 @@ module ibex_decoder #(
 
       OPCODE_STORE: begin
         //alu_op_a_mux_sel_o = OP_A_REG_A;
-        alu_op_a_mux_sel_o  = cap_mode_i ? OP_A_IMM : OP_A_REG_A;
+        alu_op_a_mux_sel_o = cap_mode_i ? OP_A_IMM : OP_A_REG_A;
         alu_op_b_mux_sel_o = OP_B_REG_B;
         data_req_o         = 1'b1;
         data_we_o          = 1'b1;
         alu_operator_o     = ALU_ADD;
         mem_ddc_relative_o = !cap_mode_i;
-        use_cap_base_o = 1'b0;
+        use_cap_base_o     = 1'b0;
 
         if (!instr[14]) begin
           // offset from immediate
@@ -372,9 +366,9 @@ module ibex_decoder #(
           2'b01: data_type_o = 2'b01; // SH
           2'b10: data_type_o = 2'b00; // SW
           2'b11: begin
-            data_type_o = 2'b11; // SD
+            data_type_o      = 2'b11; // SD
             mem_cap_access_o = 1'b1;
-            use_cap_base_o = 1'b0;
+            use_cap_base_o   = 1'b0;
           end
         endcase
       end
@@ -386,8 +380,8 @@ module ibex_decoder #(
         regfile_wdata_sel_o = RF_WD_LSU;
         regfile_we          = 1'b1;
         data_type_o         = 2'b00;
-        mem_ddc_relative_o = !cap_mode_i;
-        use_cap_base_o = 1'b0;
+        mem_ddc_relative_o  = !cap_mode_i;
+        use_cap_base_o      = 1'b0;
 
         // offset from immediate
         alu_operator_o      = ALU_ADD;
@@ -403,11 +397,10 @@ module ibex_decoder #(
           2'b01:   data_type_o = 2'b01; // LH
           2'b10:   data_type_o = 2'b00; // LW
           2'b11: begin
-            data_type_o = 2'b11; // LD
+            data_type_o      = 2'b11; // LD
             mem_cap_access_o = 1'b1;
-            use_cap_base_o = 1'b0;
+            use_cap_base_o   = 1'b0;
           end
-          //default: data_type_o = 2'b00; // illegal or reg-reg
         endcase
 
         // reg-reg load (different encoding)
@@ -430,13 +423,6 @@ module ibex_decoder #(
             end
           endcase
         end
-
-        /* this is used for capability reads so needs to be commented out
-        if (instr[14:12] == 3'b011) begin
-          // LD -> RV64 only
-          illegal_insn = 1'b1;
-        end
-        */
       end
 
       /////////
@@ -461,13 +447,13 @@ module ibex_decoder #(
           regfile_we          = 1'b1;
         end else begin
           // send this instruction to the CHERI ALU
-          cheri_en_o = 1'b1;
-          cheri_base_opcode_o = C_INC_OFFSET_IMM;
+          cheri_en_o            = 1'b1;
+          cheri_base_opcode_o   = C_INC_OFFSET_IMM;
           cheri_op_a_mux_sel_o  = CHERI_OP_A_PCC;
           cheri_op_b_mux_sel_o  = CHERI_OP_B_IMM;
           cheri_imm_b_mux_sel_o = CHERI_IMM_B_U;
-          regfile_wdata_sel_o = RF_WD_CHERI;
-          regfile_we          = 1'b1;
+          regfile_wdata_sel_o   = RF_WD_CHERI;
+          regfile_we            = 1'b1;
         end
       end
 
@@ -686,10 +672,11 @@ module ibex_decoder #(
 
       OPCODE_CHERI: begin
         // set CHERI stuff
-        cheri_en_o = 1'b1;
-        cheri_a_en_o = 1'b1;
+        cheri_en_o           = 1'b1;
+        cheri_a_en_o         = 1'b1;
         cheri_op_a_mux_sel_o = CHERI_OP_A_REG_CAP;
-        regfile_wdata_sel_o = RF_WD_CHERI;
+        regfile_wdata_sel_o  = RF_WD_CHERI;
+
         unique case (cheri_base_opcode)
           C_SET_BOUNDS_IMM, C_INC_OFFSET_IMM: begin
                 regfile_we          = 1'b1;
@@ -699,38 +686,37 @@ module ibex_decoder #(
 
           THREE_OP: begin // The instruction is a three-operand instruction
             unique case (cheri_threeop_opcode)
-              // 2 in 1 out
               C_SET_BOUNDS, C_SET_BOUNDS_EXACT, C_AND_PERM,
               C_SET_FLAGS, C_SET_OFFSET, C_SET_ADDR, C_INC_OFFSET: begin
-                regfile_we          = 1'b1;
+                regfile_we           = 1'b1;
                 cheri_op_b_mux_sel_o = CHERI_OP_B_REG_NUM;
-                cheri_b_en_o = 1'b1;
+                cheri_b_en_o         = 1'b1;
               end
 
               C_BUILD_CAP, C_TEST_SUBSET: begin
-                regfile_we = 1'b1;
+                regfile_we           = 1'b1;
                 cheri_op_a_mux_sel_o = CHERI_OP_A_REG_DDC;
                 cheri_op_b_mux_sel_o = CHERI_OP_B_REG_CAP;
-                cheri_b_en_o = 1'b1;
+                cheri_b_en_o         = 1'b1;
               end
 
               C_SUB, C_COPY_TYPE, C_SEAL, C_C_SEAL, C_UNSEAL: begin
-                regfile_we          = 1'b1;
+                regfile_we           = 1'b1;
                 cheri_op_b_mux_sel_o = CHERI_OP_B_REG_CAP;
-                cheri_b_en_o = 1'b1;
+                cheri_b_en_o         = 1'b1;
               end
 
               C_TO_PTR: begin
-                regfile_we          = 1'b1;
+                regfile_we           = 1'b1;
                 cheri_op_b_mux_sel_o = CHERI_OP_B_REG_DDC;
-                cheri_b_en_o = 1'b1;
+                cheri_b_en_o         = 1'b1;
               end
 
               C_FROM_PTR: begin
-                regfile_we          = 1'b1;
+                regfile_we           = 1'b1;
                 cheri_op_a_mux_sel_o = CHERI_OP_A_REG_DDC;
                 cheri_op_b_mux_sel_o = CHERI_OP_B_REG_NUM;
-                cheri_b_en_o = 1'b1;
+                cheri_b_en_o         = 1'b1;
               end
 
               CCALL: begin
@@ -742,19 +728,18 @@ module ibex_decoder #(
                   jump_in_dec_o = 1'b1;
                   if (instr_new_i) begin
                     // in this cycle we jump to the new PC
-                    cheri_b_en_o = 1'b1;
-                    cheri_ccall_type_o = CCALL_CCALLFAST_CYCLE1;
+                    cheri_b_en_o         = 1'b1;
+                    cheri_ccall_type_o   = CCALL_CCALLFAST_CYCLE1;
                     cheri_op_b_mux_sel_o = CHERI_OP_B_REG_CAP;
-                    jump_set_o = 1'b1;
-                    regfile_we = 1'b0;
-                    //$display("a: %h, b: %h, d: %h");
+                    jump_set_o           = 1'b1;
+                    regfile_we           = 1'b0;
                   end else begin
                     // in this cycle we set the value of register 31
-                    cheri_b_en_o = 1'b1;
-                    cheri_ccall_type_o = CCALL_CCALLFAST_CYCLE2;
+                    cheri_b_en_o         = 1'b1;
+                    cheri_ccall_type_o   = CCALL_CCALLFAST_CYCLE2;
                     cheri_op_b_mux_sel_o = CHERI_OP_B_REG_CAP;
-                    jump_set_o = 1'b0;
-                    regfile_we = 1'b1;
+                    jump_set_o           = 1'b0;
+                    regfile_we           = 1'b1;
                   end
                 end else if (instr[`REG_D] == 5'h1F) begin
                   // CRETURN
@@ -773,27 +758,26 @@ module ibex_decoder #(
                 // Ibex does not have user or supervisor mode support yet so for now we claim that the
                 // instructions are illegal
                 // They're left here but commented out if needed in the future
-                if ((regfile_raddr_b_o == SCR_PCC)
-                                ||(regfile_raddr_b_o == SCR_DDC)
-                                //||(regfile_raddr_b_o == SCR_UTCC)
-                                //||(regfile_raddr_b_o == SCR_UTDC)
-                                //||(regfile_raddr_b_o == SCR_USCRATCHC)
-                                //||(regfile_raddr_b_o == SCR_UEPCC)
-                                //||(regfile_raddr_b_o == SCR_STCC)
-                                //||(regfile_raddr_b_o == SCR_STDC)
-                                //||(regfile_raddr_b_o == SCR_SSCRATCHC)
-                                //||(regfile_raddr_b_o == SCR_SEPCC)
-                                ||(regfile_raddr_b_o == SCR_MTCC)
-                                ||(regfile_raddr_b_o == SCR_MTDC)
-                                ||(regfile_raddr_b_o == SCR_MSCRATCHC)
-                                ||(regfile_raddr_b_o == SCR_MEPCC)) begin
-                  scr_access_o = 1'b1;
-                  regfile_wdata_sel_o = RF_WD_CSR;
-                  regfile_we = regfile_waddr_o != '0;
-                  //scr_op_o = scr_op_e'{regfile_waddr_o != '0, regfile_raddr_a_o != '0};
-                  scr_op_o = scr_op_e'({regfile_waddr_o != '0, regfile_raddr_a_o != '0});
-                  cheri_en_o = 1'b1;
-                  cheri_op_b_mux_sel_o = CHERI_OP_B_IMM;
+                if ((  regfile_raddr_b_o == SCR_PCC       )
+                   ||( regfile_raddr_b_o == SCR_DDC       )
+                 //||( regfile_raddr_b_o == SCR_UTCC      )
+                 //||( regfile_raddr_b_o == SCR_UTDC      )
+                 //||( regfile_raddr_b_o == SCR_USCRATCHC )
+                 //||( regfile_raddr_b_o == SCR_UEPCC     )
+                 //||( regfile_raddr_b_o == SCR_STCC      )
+                 //||( regfile_raddr_b_o == SCR_STDC      )
+                 //||( regfile_raddr_b_o == SCR_SSCRATCHC )
+                 //||( regfile_raddr_b_o == SCR_SEPCC     )
+                   ||( regfile_raddr_b_o == SCR_MTCC      )
+                   ||( regfile_raddr_b_o == SCR_MTDC      )
+                   ||( regfile_raddr_b_o == SCR_MSCRATCHC )
+                   ||( regfile_raddr_b_o == SCR_MEPCC     )) begin
+                  scr_access_o          = 1'b1;
+                  regfile_wdata_sel_o   = RF_WD_CSR;
+                  regfile_we            = regfile_waddr_o != '0;
+                  scr_op_o              = scr_op_e'({regfile_waddr_o != '0, regfile_raddr_a_o != '0});
+                  cheri_en_o            = 1'b1;
+                  cheri_op_b_mux_sel_o  = CHERI_OP_B_IMM;
                   cheri_imm_b_mux_sel_o = CHERI_IMM_B_RS2;
                 end else begin
                   illegal_insn = 1'b1;
@@ -804,7 +788,7 @@ module ibex_decoder #(
               // the effective address after adding the immediate.
               STORE: begin
                 data_req_o = 1'b1;
-                data_we_o = 1'b1;
+                data_we_o  = 1'b1;
                 cheri_en_o = 1'b0;
 
                 mem_ddc_relative_o = ~instr[10];
@@ -812,8 +796,8 @@ module ibex_decoder #(
 
                 alu_op_a_mux_sel_o = OP_A_REG_A;
                 alu_op_b_mux_sel_o = OP_B_IMM;
-                imm_b_mux_sel_o = IMM_B_ZERO;
-                alu_operator_o      = ALU_ADD;
+                imm_b_mux_sel_o    = IMM_B_ZERO;
+                alu_operator_o     = ALU_ADD;
 
                 // store size
                 unique case (instr[8:7])
@@ -821,7 +805,7 @@ module ibex_decoder #(
                   2'b01:  data_type_o = 2'b01;
                   2'b10:  data_type_o = 2'b00;
                   2'b11: begin
-                    data_type_o = 2'b11;
+                    data_type_o      = 2'b11;
                     // TODO this might become redundant if the spec changes to allow only SC to
                     // store capability-sized chunks of memory
                     mem_cap_access_o = 1'b1;
@@ -869,11 +853,9 @@ module ibex_decoder #(
                   end
                 endcase
 
-                if (instr[24] || instr[22]) begin
+                if (instr[24]) begin
                   // instr[24] indicates LR versions of the loads, not available because
                   // the A extension is not suported
-                  // instr[22] indicates quad-size loads, not available because this can only
-                  // read up to doubles
                   illegal_insn = 1'b1;
                 end
               end
@@ -889,22 +871,22 @@ module ibex_decoder #(
                         // there's nothing to actually calculate but we need to perform exception checks
                         cheri_op_a_mux_sel_o  = CHERI_OP_A_REG_CAP;
                         cheri_op_b_mux_sel_o  = CHERI_OP_B_PCC;
-                        regfile_we          = 1'b0;
-                        jump_set_o          = 1'b1;
+                        regfile_we            = 1'b0;
+                        jump_set_o            = 1'b1;
                       end else begin
                         // Calculate and store PC+4
-                        cheri_base_opcode_o = C_INC_OFFSET_IMM;
+                        cheri_base_opcode_o   = C_INC_OFFSET_IMM;
                         cheri_op_a_mux_sel_o  = CHERI_OP_A_PCC;
                         cheri_op_b_mux_sel_o  = CHERI_OP_B_IMM;
                         cheri_imm_b_mux_sel_o = CHERI_IMM_B_INCR_PC;
-                        regfile_we          = 1'b1;
+                        regfile_we            = 1'b1;
                       end
                     end
 
                   C_GET_PERM, C_GET_TYPE, C_GET_BASE, C_GET_LEN, C_GET_TAG, C_GET_SEALED, C_GET_OFFSET,
                   C_GET_ADDR, C_GET_FLAGS, C_MOVE, C_CLEAR_TAG, CLEAR: begin
                       // these don't need any extra work in here
-                      illegal_insn = 1'b0;
+                      regfile_we = 1'b1;
                   end
 
                   default: begin

@@ -88,12 +88,12 @@ module ibex_cheri_memchecker #(
 
   logic          [64:0] toMem_o;
 
-  logic [`CAP_SIZE-1:0] base_getAddr_o;
-  logic [`CAP_SIZE-1:0] base_isValidCap_o;
-  logic [`CAP_SIZE-1:0] base_isSealed_o;
-  logic [`CAP_SIZE-1:0] base_getBase_o;
-  logic [`CAP_SIZE-1:0] base_getTop_o;
-  logic [`CAP_SIZE-1:0] base_getPerms_o;
+  logic [`CAP_SIZE-1:0] cap_base_getAddr_o;
+  logic [`CAP_SIZE-1:0] cap_base_isValidCap_o;
+  logic [`CAP_SIZE-1:0] cap_base_isSealed_o;
+  logic [`CAP_SIZE-1:0] cap_base_getBase_o;
+  logic [`CAP_SIZE-1:0] cap_base_getTop_o;
+  logic [`CAP_SIZE-1:0] cap_base_getPerms_o;
 
 
   // get data size from type to use in bounds checking
@@ -108,13 +108,13 @@ module ibex_cheri_memchecker #(
   assign data_be_o = access_capability_i ? 8'hff : data_be_i;
 
   // perform the memory checks
-  assign cheri_mem_exc_o[TAG_VIOLATION] = !base_isValidCap_o;
-  assign cheri_mem_exc_o[SEAL_VIOLATION] = base_isSealed_o;
-  assign cheri_mem_exc_o[PERMIT_LOAD_VIOLATION] = !write_i && !base_getPerms_o[2];
-  assign cheri_mem_exc_o[PERMIT_STORE_VIOLATION] = write_i && !base_getPerms_o[3];
-  assign cheri_mem_exc_o[PERMIT_EXECUTE_VIOLATION] = DATA_MEM == 1'b0 && !base_getPerms_o[1];
-  assign cheri_mem_exc_o[LENGTH_VIOLATION] =  (address_i < base_getBase_o)
-                                           || (address_i + data_size > base_getTop_o);
+  assign cheri_mem_exc_o[TAG_VIOLATION] = !cap_base_isValidCap_o;
+  assign cheri_mem_exc_o[SEAL_VIOLATION] = cap_base_isSealed_o;
+  assign cheri_mem_exc_o[PERMIT_LOAD_VIOLATION] = !write_i && !cap_base_getPerms_o[2];
+  assign cheri_mem_exc_o[PERMIT_STORE_VIOLATION] = write_i && !cap_base_getPerms_o[3];
+  assign cheri_mem_exc_o[PERMIT_EXECUTE_VIOLATION] = DATA_MEM == 1'b0 && !cap_base_getPerms_o[1];
+  assign cheri_mem_exc_o[LENGTH_VIOLATION] =  (address_i < cap_base_getBase_o)
+                                           || (address_i + data_size > cap_base_getTop_o);
 
   // TODO remove
   // temporarily throw trap on an unaligned access
@@ -139,7 +139,7 @@ module ibex_cheri_memchecker #(
   // write logic
   always_comb begin
     mem_data_o = access_capability_i ? toMem_o[63:0] : lsu_data_i[63:0];
-    mem_tag_o = access_capability_i ? toMem_o[64] : '0;
+    mem_tag_o  = access_capability_i ? toMem_o[64] : '0;
   end
 
 
@@ -160,34 +160,34 @@ module ibex_cheri_memchecker #(
         .wrap64_toMem             ( toMem_o                 )
   );
 
-  module_wrap64_getAddr             module_getAddr (
+  module_wrap64_getAddr             module_getAddr_cap_base (
         .wrap64_getAddr_cap       ( cap_base_i              ),
-        .wrap64_getAddr           ( base_getAddr_o          )
+        .wrap64_getAddr           ( cap_base_getAddr_o          )
   );
 
-  module_wrap64_isValidCap          module_isValidCap (
+  module_wrap64_isValidCap          module_isValidCap_cap_base (
         .wrap64_isValidCap_cap    ( cap_base_i              ),
-        .wrap64_isValidCap        ( base_isValidCap_o       )
+        .wrap64_isValidCap        ( cap_base_isValidCap_o       )
   );
 
-  module_wrap64_isSealed            module_isSealed (
+  module_wrap64_isSealed            module_isSealed_cap_base (
         .wrap64_isSealed_cap      ( cap_base_i              ),
-        .wrap64_isSealed          ( base_isSealed_o         )
+        .wrap64_isSealed          ( cap_base_isSealed_o         )
   );
 
-  module_wrap64_getBase             module_getBase (
+  module_wrap64_getBase             module_getBase_cap_base (
         .wrap64_getBase_cap       ( cap_base_i              ),
-        .wrap64_getBase           ( base_getBase_o          )
+        .wrap64_getBase           ( cap_base_getBase_o          )
   );
 
-  module_wrap64_getTop              module_getTop (
+  module_wrap64_getTop              module_getTop_cap_base (
         .wrap64_getTop_cap        ( cap_base_i              ),
-        .wrap64_getTop            ( base_getTop_o           )
+        .wrap64_getTop            ( cap_base_getTop_o           )
   );
 
-  module_wrap64_getPerms            module_getPerms (
+  module_wrap64_getPerms            module_getPerms_cap_base (
         .wrap64_getPerms_cap      ( cap_base_i              ),
-        .wrap64_getPerms          ( base_getPerms_o         )
+        .wrap64_getPerms          ( cap_base_getPerms_o         )
   );
 
 endmodule

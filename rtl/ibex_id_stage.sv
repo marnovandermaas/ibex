@@ -79,6 +79,7 @@ module ibex_id_stage #(
     // Stalls
     input  logic                      ex_valid_i,     // EX stage has valid output
     input  logic                      lsu_valid_i,    // LSU has valid output, or is done
+
     // ALU
     output ibex_defines::alu_op_e     alu_operator_ex_o,
     output logic [31:0]               alu_operand_a_ex_o,
@@ -95,13 +96,13 @@ module ibex_id_stage #(
 
     // CHERI
     // signals to the CHERI ALU
-    output logic                     cheri_en_o,                            // enable the CHERI ALU
-    output ibex_defines::cheri_base_opcode_e       cheri_base_opcode_o,
-    output ibex_defines::cheri_threeop_funct7_e    cheri_threeop_opcode_o,
-    output ibex_defines::cheri_s_a_d_funct5_e      cheri_sad_opcode_o,
-    output ibex_defines::cheri_ccall_e      cheri_ccall_type_o,
-    output logic [`CAP_SIZE-1:0]      cheri_operand_a_o,
-    output logic [`CAP_SIZE-1:0]      cheri_operand_b_o,
+    output logic                                  cheri_en_o,              // enable the CHERI ALU
+    output ibex_defines::cheri_base_opcode_e      cheri_base_opcode_o,
+    output ibex_defines::cheri_threeop_funct7_e   cheri_threeop_opcode_o,
+    output ibex_defines::cheri_s_a_d_funct5_e     cheri_sad_opcode_o,
+    output ibex_defines::cheri_ccall_e            cheri_ccall_type_o,
+    output logic [`CAP_SIZE-1:0]                  cheri_operand_a_o,
+    output logic [`CAP_SIZE-1:0]                  cheri_operand_b_o,
 
     // CHERI exception signals
     input  logic [`EXCEPTION_SIZE-1:0]      cheri_exc_a_i,
@@ -114,7 +115,7 @@ module ibex_id_stage #(
 
     // whether the output from the CHERI ALU is a capability
     // this tells us whether we need to pass the output through a nullWithAddr
-    input logic                  cheri_wrote_cap_i,
+    input  logic cheri_wrote_cap_i,
 
     // tell the LSU whether it should use the address as an offset from the base or from
     // the address of the capability that was passed in
@@ -132,33 +133,34 @@ module ibex_id_stage #(
     output logic [31:0]               csr_mtval_o,
     input  logic                      illegal_csr_insn_i,
 
-    output [4:0] reg_addr_a_o,
-    output [4:0] reg_addr_b_o,
-    output ibex_defines::c_exc_reg_mux_sel_e csr_reg_to_save_o,
+    // used for saving mccsr address on exception
+    output [4:0]                              reg_addr_a_o,
+    output [4:0]                              reg_addr_b_o,
+    output ibex_defines::c_exc_reg_mux_sel_e  csr_reg_to_save_o,
 
     // SCR signals
-    // DDC (direct data capability)
-    input logic [`CAP_SIZE-1:0] scr_ddc_i,
+    // DDC
+    input  logic [`CAP_SIZE-1:0] scr_ddc_i,
 
     // SCR read signals
-    output logic  scr_access_o,
-    output ibex_defines::scr_op_e scr_op_o,
-    input logic [`CAP_SIZE-1:0] scr_rdata_i,
+    output logic                   scr_access_o,
+    output ibex_defines::scr_op_e  scr_op_o,
+    input  logic [`CAP_SIZE-1:0]   scr_rdata_i,
 
 
     // Interface to load store unit
-    output logic                      data_req_ex_o,
-    output logic                      data_we_ex_o,
-    output logic [1:0]                data_type_ex_o,
-    output logic                      data_sign_ext_ex_o,
-    output logic [1:0]                data_reg_offset_ex_o,
-    output logic [`CAP_SIZE-1:0]               data_wdata_ex_o,
+    output logic                   data_req_ex_o,
+    output logic                   data_we_ex_o,
+    output logic [1:0]             data_type_ex_o,
+    output logic                   data_sign_ext_ex_o,
+    output logic [1:0]             data_reg_offset_ex_o,
+    output logic [`CAP_SIZE-1:0]   data_wdata_ex_o,
 
-    input  logic                      lsu_addr_incr_req_i,
-    input  logic [31:0]               lsu_addr_last_i,
+    input  logic                   lsu_addr_incr_req_i,
+    input  logic [31:0]            lsu_addr_last_i,
 
-    output logic [`CAP_SIZE-1:0] mem_cap_o,
-    output logic mem_cap_access_o,
+    output logic [`CAP_SIZE-1:0]   mem_cap_o,
+    output logic                   mem_cap_access_o,
 
     // Interrupt signals
     input  logic                      irq_i,
@@ -179,8 +181,8 @@ module ibex_id_stage #(
     input  logic                      debug_ebreakm_i,
 
     // Write back signal
-    input  logic [`CAP_SIZE-1:0]               regfile_wdata_lsu_i,
-    input  logic [`CAP_SIZE-1:0]               regfile_wdata_ex_i,
+    input  logic [`CAP_SIZE-1:0]      regfile_wdata_lsu_i,
+    input  logic [`CAP_SIZE-1:0]      regfile_wdata_ex_i,
     input  logic [31:0]               csr_rdata_i,
 
 `ifdef RVFI
@@ -237,14 +239,13 @@ module ibex_id_stage #(
   logic [31:0] imm_b;       // contains the immediate for operand b
 
   // Signals running between controller and exception controller
-  logic       irq_req_ctrl;
-  logic [4:0] irq_id_ctrl;
-  logic       exc_ack, exc_kill;// handshake
+  logic        irq_req_ctrl;
+  logic [4:0]  irq_id_ctrl;
+  logic        exc_ack, exc_kill;// handshake
 
   // Register file interface
   logic [4:0]  regfile_raddr_a;
   logic [4:0]  regfile_raddr_b;
-
   logic [4:0]  regfile_waddr;
 
   // integer data signals
@@ -276,12 +277,13 @@ module ibex_id_stage #(
   md_op_e      multdiv_operator;
   logic [1:0]  multdiv_signed_mode;
 
-  // CHERI
+  // CHERI operand selection
   c_op_a_sel_e    cheri_op_a_mux_sel;
   c_op_b_sel_e    cheri_op_b_mux_sel;
 
+  // CHERI B immediate & selection
   logic [`INTEGER_SIZE-1:0] cheri_imm_b;
-  cheri_imm_b_sel_e    cheri_imm_b_mux_sel;
+  cheri_imm_b_sel_e         cheri_imm_b_mux_sel;
 
   // signals from decoder telling us whether each operand is being used by the instruction
   // currently used for masking exceptions
@@ -290,16 +292,17 @@ module ibex_id_stage #(
 
   // nullWithAddr function inputs and outputs
   logic [`INTEGER_SIZE-1:0] nullWithAddr_i;
-  logic [`CAP_SIZE-1:0] nullWithAddr_o;
+  logic [    `CAP_SIZE-1:0] nullWithAddr_o;
   logic [`INTEGER_SIZE-1:0] nullWithAddr2_i;
-  logic [`CAP_SIZE-1:0] nullWithAddr2_o;
+  logic [    `CAP_SIZE-1:0] nullWithAddr2_o;
 
   // other function inputs and outputs
   logic [`INTEGER_SIZE-1:0] a_getAddr_o;
   logic [`INTEGER_SIZE-1:0] b_getAddr_o;
   logic [`INTEGER_SIZE-1:0] rd_wdata_getAddr_o;
+  logic [`INTEGER_SIZE-1:0] pc_id_i_getBase_o;
   logic [`INTEGER_SIZE-1:0] pc_id_i_getOffset_o;
-  logic [`FLAG_SIZE-1:0] pcc_getFlags_o;
+  logic [   `FLAG_SIZE-1:0] pcc_getFlags_o;
 
 
   // cheri exception signals
@@ -366,7 +369,7 @@ module ibex_id_stage #(
       cheri_exc_instr[1] = '0;
   end
 
-  // pass register addresses to SCRs to get cause
+  // pass register addresses to SCRs to properly set MCCSR
   assign reg_addr_a_o = regfile_raddr_a;
   assign reg_addr_b_o = regfile_raddr_b;
 
@@ -377,32 +380,54 @@ module ibex_id_stage #(
 
   always_ff @(posedge clk_i) begin
     if (cheri_exc_o) begin
+      $display("pc: %h", pc_id_i_getOffset_o);
+      $display("pc base: %h", pc_id_i_getBase_o);
+      $display("pc top: %h", pc_id_i_getTop_o);
       $display("exc a: %h", cheri_exc_a_i & {`EXCEPTION_SIZE-2{cheri_a_en_dec}});
       $display("exc b: %h", cheri_exc_b_i & {`EXCEPTION_SIZE-2{cheri_b_en_dec}});
       $display("exc mem: %h", cheri_exc_mem_i & {`EXCEPTION_SIZE-2{1'b1}});
       $display("exc instr: %h", cheri_exc_instr_i & {`EXCEPTION_SIZE-2{1'b1}});
-      $display("exc scr: %h", cheri_scr_exc_i & {`EXCEPTION_SIZE-2{1'b1}});
+      $display("exc scr: %h", cheri_exc_scr_i & {`EXCEPTION_SIZE-2{1'b1}});
       $display("capability: %h", mem_cap_o);
       $display("base: %h", z_getBase_o);
       $display("addr: %h", z_getAddr_o);
       $display("length: %h", z_getLength_o);
+      $display("top: %h", z_getTop_o);
+      $display("perms: %h", z_getPerms_o);
     end
   end
 
+
 logic [`INTEGER_SIZE-1:0] z_getLength_o;
+logic [`INTEGER_SIZE-1:0] z_getBase_o;
+logic [`INTEGER_SIZE-1:0] z_getAddr_o;
+logic [`INTEGER_SIZE-1:0] z_getTop_o;
+logic [`INTEGER_SIZE-1:0] pc_id_i_getTop_o;
+logic [`INTEGER_SIZE-1:0] z_getPerms_o;
+
 module_wrap64_getLength module_getLength_z (
   .wrap64_getLength_cap(mem_cap_o),
     .wrap64_getLength(z_getLength_o));
 
-logic [`INTEGER_SIZE-1:0] z_getBase_o;
 module_wrap64_getBase module_getBase_z (
     .wrap64_getBase_cap     (mem_cap_o),
     .wrap64_getBase         (z_getBase_o));
 
-logic [`INTEGER_SIZE-1:0] z_getAddr_o;
 module_wrap64_getAddr module_getAddr_z (
     .wrap64_getAddr_cap (mem_cap_o),
     .wrap64_getAddr     (z_getAddr_o));
+
+module_wrap64_getTop module_getTop_z (
+    .wrap64_getTop_cap (mem_cap_o),
+    .wrap64_getTop     (z_getTop_o));
+
+module_wrap64_getTop module_wrap64_getTop_z (
+  .wrap64_getTop_cap    (pc_id_i),
+    .wrap64_getTop      (pc_id_i_getTop_o));
+
+module_wrap64_getPerms module_wrap64_getPerms_z (
+  .wrap64_getPerms_cap    (regfile_rdata_a_cap),
+    .wrap64_getPerms      (z_getPerms_o));
 
 
 
@@ -416,8 +441,11 @@ module_wrap64_getAddr module_getAddr_z (
   assign alu_op_b_mux_sel = lsu_addr_incr_req_i ? OP_B_IMM        : alu_op_b_mux_sel_dec;
   assign imm_b_mux_sel    = lsu_addr_incr_req_i ? IMM_B_INCR_ADDR : imm_b_mux_sel_dec;
 
-  // choose whether we want to pass DDC or the register contents as the memory access capability
+  // choose whether we want to use DDC or the register contents as the capability providing
+  // authority for the memory access
   assign mem_cap_o = mem_ddc_relative ? scr_ddc_i : regfile_rdata_a_cap;
+
+
 
   ///////////////////
   // Operand A MUX //
@@ -443,12 +471,15 @@ module_wrap64_getAddr module_getAddr_z (
       CHERI_OP_A_REG_CAP: cheri_operand_a_o = regfile_rdata_a_cap;
       CHERI_OP_A_REG_NUM: cheri_operand_a_o = regfile_rdata_a;
       CHERI_OP_A_REG_DDC: cheri_operand_a_o = regfile_raddr_a == '0 ? scr_ddc_i : regfile_rdata_a_cap;
-      // TODO for implementing misaligned double-word capability accesses, will need a OP_A_FWD similar to above
+      // TODO if implementing misaligned double-word capability accesses, will need a OP_A_FWD similar to above
       // at the moment we always throw an exception on unaligned double-word access so we don't care about this
+      // will need to update if the spec changes to allow unaligned double-word accesses on RV32-CHERI
       CHERI_OP_A_PCC: cheri_operand_a_o = pc_id_i;
       default:          cheri_operand_a_o = 'X;
     endcase
   end
+
+
 
   ///////////////////
   // Operand B MUX //
@@ -463,7 +494,6 @@ module_wrap64_getAddr module_getAddr_z (
       IMM_B_U:         imm_b = imm_u_type;
       IMM_B_J:         imm_b = imm_j_type;
       IMM_B_INCR_PC:   imm_b = instr_is_compressed_i ? 32'h2 : 32'h4;
-      // this has been changed from 4 to 8 for double-word aligned memory
       IMM_B_INCR_ADDR: imm_b = 32'h8;
       IMM_B_ZERO:      imm_b = 32'h0;
       default:         imm_b = 'X;
@@ -477,10 +507,10 @@ module_wrap64_getAddr module_getAddr_z (
   always_comb begin
     unique case (cheri_imm_b_mux_sel)
       CHERI_IMM_B_INCR_PC: cheri_imm_b = 'h4;
-      CHERI_IMM_B_I: cheri_imm_b = imm_i_type;
-      CHERI_IMM_B_S: cheri_imm_b = imm_s_type;
-      CHERI_IMM_B_U: cheri_imm_b = imm_u_type;
-      CHERI_IMM_B_RS2: cheri_imm_b = regfile_raddr_b;
+      CHERI_IMM_B_I:       cheri_imm_b = imm_i_type;
+      CHERI_IMM_B_S:       cheri_imm_b = imm_s_type;
+      CHERI_IMM_B_U:       cheri_imm_b = imm_u_type;
+      CHERI_IMM_B_RS2:     cheri_imm_b = regfile_raddr_b;
       default: cheri_imm_b = 'X;
     endcase
   end
@@ -488,12 +518,12 @@ module_wrap64_getAddr module_getAddr_z (
   // CHERI ALU MUX for Operand B
   always_comb begin
     unique case (cheri_op_b_mux_sel)
-      CHERI_OP_B_IMM:   cheri_operand_b_o = (cheri_imm_b_mux_sel == CHERI_IMM_B_INCR_PC) ? 'h4 : cheri_imm_b;
-      CHERI_OP_B_REG_CAP:   cheri_operand_b_o = regfile_rdata_b_cap;
-      CHERI_OP_B_REG_NUM:   cheri_operand_b_o = regfile_rdata_b;
-      CHERI_OP_B_REG_DDC:   cheri_operand_b_o = regfile_raddr_b == '0 ? scr_ddc_i : regfile_rdata_b_cap;
-      CHERI_OP_B_PCC:   cheri_operand_b_o = pc_id_i;
-      default:          cheri_operand_b_o = 'X;
+      CHERI_OP_B_IMM:      cheri_operand_b_o = cheri_imm_b;
+      CHERI_OP_B_REG_CAP:  cheri_operand_b_o = regfile_rdata_b_cap;
+      CHERI_OP_B_REG_NUM:  cheri_operand_b_o = regfile_rdata_b;
+      CHERI_OP_B_REG_DDC:  cheri_operand_b_o = regfile_raddr_b == '0 ? scr_ddc_i : regfile_rdata_b_cap;
+      CHERI_OP_B_PCC:      cheri_operand_b_o = pc_id_i;
+      default:             cheri_operand_b_o = 'X;
     endcase
   end
 
@@ -503,6 +533,7 @@ module_wrap64_getAddr module_getAddr_z (
 
   // Register file write enable mux - do not propagate illegal CSR ops, do not write when idle,
   // for loads/stores and multdiv operations write when the data is ready only
+  // TODO rewrite this expression more cleanly
   assign regfile_we = (  illegal_csr_insn_i
                       || !instr_executing
                       || lsu_load_err_i
@@ -518,7 +549,7 @@ module_wrap64_getAddr module_getAddr_z (
   //    set the write value
   always_comb begin : regfile_wdata_mux
     unique case (regfile_wdata_sel)
-      // data is coming from the EX block
+      // data is coming from the EX block, but not from the CHERI ALU
       // this means it is coming from either the MULT/DIV or ALU blocks
       RF_WD_EX: begin
         nullWithAddr_i = regfile_wdata_ex_i;
@@ -651,25 +682,25 @@ module_wrap64_getAddr module_getAddr_z (
       .cheri_en_o(cheri_en_o),
 
       // CHERI ALU operation selection signals
-      .cheri_base_opcode_o(cheri_base_opcode_o),
-      .cheri_threeop_opcode_o(cheri_threeop_opcode_o),
-      .cheri_sad_opcode_o(cheri_sad_opcode_o),
-      .cheri_ccall_type_o(cheri_ccall_type_o),
+      .cheri_base_opcode_o             ( cheri_base_opcode_o    ),
+      .cheri_threeop_opcode_o          ( cheri_threeop_opcode_o ),
+      .cheri_sad_opcode_o              ( cheri_sad_opcode_o     ),
+      .cheri_ccall_type_o              ( cheri_ccall_type_o     ),
 
       // CHERI operand selection
-      .cheri_op_a_mux_sel_o(cheri_op_a_mux_sel),
-      .cheri_op_b_mux_sel_o(cheri_op_b_mux_sel),
-      .cheri_imm_b_mux_sel_o(cheri_imm_b_mux_sel),
+      .cheri_op_a_mux_sel_o            ( cheri_op_a_mux_sel     ),
+      .cheri_op_b_mux_sel_o            ( cheri_op_b_mux_sel     ),
+      .cheri_imm_b_mux_sel_o           ( cheri_imm_b_mux_sel    ),
 
-      // CHERI operands enable
-      .cheri_a_en_o(cheri_a_en_dec),
-      .cheri_b_en_o(cheri_b_en_dec),
+      // CHERI operands enable, used for masking out exceptions
+      .cheri_a_en_o                    ( cheri_a_en_dec         ),
+      .cheri_b_en_o                    ( cheri_b_en_dec         ),
 
       // tell decoder we're in capability encoding mode
-      .cap_mode_i(pcc_getFlags_o),
+      .cap_mode_i                      ( pcc_getFlags_o         ),
 
       // capability base selection; see comment above declaration of signal
-      .use_cap_base_o(use_cap_base_o),
+      .use_cap_base_o                  ( use_cap_base_o         ),
 
       // CSRs
       .csr_access_o                    ( csr_access_o         ),
@@ -687,11 +718,11 @@ module_wrap64_getAddr module_getAddr_z (
       .data_sign_extension_o           ( data_sign_ext_id     ),
       .data_reg_offset_o               ( data_reg_offset_id   ),
 
-      // whether we're trying to read/write a capability or not
-      .mem_cap_access_o (mem_cap_access_o),
+      // whether this memory access is trying to read/write a capability or not
+      .mem_cap_access_o                ( mem_cap_access_o     ),
 
       // whether the memory access is relative to DDC
-      .mem_ddc_relative_o (mem_ddc_relative),
+      .mem_ddc_relative_o              ( mem_ddc_relative     ),
 
       // jump/branches
       .jump_in_dec_o                   ( jump_in_dec          ),
@@ -759,8 +790,8 @@ module_wrap64_getAddr module_getAddr_z (
       .branch_set_i                   ( branch_set_q           ),
       .jump_set_i                     ( jump_set               ),
 
-      .irq_i                          ( irq_i                  ),
       // Interrupt Controller Signals
+      .irq_i                          ( irq_i                  ),
       .irq_req_ctrl_i                 ( irq_req_ctrl           ),
       .irq_id_ctrl_i                  ( irq_id_ctrl            ),
       .m_IE_i                         ( m_irq_enable_i         ),
@@ -840,6 +871,7 @@ module_wrap64_getAddr module_getAddr_z (
   assign data_we_ex_o                = data_we_id;
   assign data_type_ex_o              = data_type_id;
   assign data_sign_ext_ex_o          = data_sign_ext_id;
+
   // pass the data to write directly from the register file or put it through a getAddr first
   assign data_wdata_ex_o             = mem_cap_access_o ? regfile_rdata_b_cap : regfile_rdata_b;
   assign data_reg_offset_ex_o        = data_reg_offset_id;
@@ -928,6 +960,7 @@ module_wrap64_getAddr module_getAddr_z (
               stall_jump              = 1'b1;
               instr_multicycle_done_n = 1'b0;
             end
+            // TODO there might be a better place for this
             cheri_en_o && (cheri_exc_o): begin
               // there's an exception in the cheri ALU
               // we want to wait for the pipeline to flush and do whatever else needs to be done
@@ -966,7 +999,7 @@ module_wrap64_getAddr module_getAddr_z (
 
   assign instr_ret_compressed_o = instr_ret_o & instr_is_compressed_i;
 
-  // nullWithAddr module instantiation
+  // function module instantiation
   module_wrap64_nullWithAddr nullWithAddr (
         .wrap64_nullWithAddr_addr   (nullWithAddr_i),
         .wrap64_nullWithAddr        (nullWithAddr_o));
@@ -986,6 +1019,10 @@ module_wrap64_getAddr module_getAddr_z (
   module_wrap64_getAddr module_getAddr_rd (
         .wrap64_getAddr_cap         (regfile_wdata_cap),
         .wrap64_getAddr             (rd_wdata_getAddr_o));
+
+  module_wrap64_getBase module_getBase_pc_id_i (
+        .wrap64_getBase_cap       (pc_id_i),
+        .wrap64_getBase           (pc_id_i_getBase_o));
 
   module_wrap64_getOffset module_getOffset_pc_id_i (
         .wrap64_getOffset_cap       (pc_id_i),

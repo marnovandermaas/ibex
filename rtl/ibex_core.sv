@@ -890,8 +890,8 @@ module ibex_core #(
       rvfi_mode              <= PRIV_LVL_M; // TODO: Update for user mode support
       rvfi_rs1_addr          <= rvfi_rs1_addr_id;
       rvfi_rs2_addr          <= rvfi_rs2_addr_id;
-      rvfi_pc_rdata          <= pc_id;
-      rvfi_pc_wdata  <= (pc_set || lsu_load_err || lsu_store_err || illegal_insn_id) ? (pc_mux_id == 3'b001 ? jump_target_ex : pc_next) : pcc_getAddr_o;
+      rvfi_pc_rdata          <= pc_id_getOffset_o;
+      rvfi_pc_wdata  <= (pc_set || lsu_load_err || lsu_store_err || illegal_insn_id || |cheri_exc) ? (pc_mux_id == 3'b001 ? jump_target_ex : pc_next) : pcc_getOffset_o;
       rvfi_mem_rmask         <= rvfi_mem_mask_int;
       rvfi_mem_wmask         <= data_we_o ? rvfi_mem_mask_int : 8'b0000;
       rvfi_valid             <= instr_ret;
@@ -1021,10 +1021,15 @@ module ibex_core #(
 
 // This is needed for the RVFI signal generation
 `ifdef RVFI
-logic [31:0] pcc_getAddr_o;
-module_wrap64_getAddr module_getAddr_a (
-    .wrap64_getAddr_cap(pc_if),
-    .wrap64_getAddr(pcc_getAddr_o));
+logic [31:0] pcc_getOffset_o;
+module_wrap64_getOffset module_getOffset_a (
+      .wrap64_getOffset_cap(pc_if),
+      .wrap64_getOffset(pcc_getOffset_o));
+
+logic [31:0] pc_id_getOffset_o;
+module_wrap64_getOffset module_getOffset_pc_id (
+      .wrap64_getOffset_cap(pc_id),
+      .wrap64_getOffset(pc_id_getOffset_o));
 `endif
 
 
