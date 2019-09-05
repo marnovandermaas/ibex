@@ -104,10 +104,13 @@ module ibex_id_stage #(
     output logic [`CAP_SIZE-1:0]      cheri_operand_b_o,
 
     // CHERI exception signals
-    input logic [`EXCEPTION_SIZE-1:0] cheri_exc_a_i,
-    input logic [`EXCEPTION_SIZE-1:0] cheri_exc_b_i,
-    input logic [`EXCEPTION_SIZE-1:0] cheri_exc_mem_i,
-    input logic [`EXCEPTION_SIZE-1:0] cheri_exc_instr_i,
+    input  logic [`EXCEPTION_SIZE-1:0]      cheri_exc_a_i,
+    input  logic [`EXCEPTION_SIZE-1:0]      cheri_exc_b_i,
+    input  logic [`EXCEPTION_SIZE-1:0]      cheri_exc_mem_i,
+    input  logic [1:0][`EXCEPTION_SIZE-1:0] cheri_exc_instr_i,
+    output ibex_defines::c_exc_cause_e      cheri_cause_o,
+    output logic                            cheri_exc_o,
+    input  logic                            cheri_exc_scr_i,
 
     // whether the output from the CHERI ALU is a capability
     // this tells us whether we need to pass the output through a nullWithAddr
@@ -129,6 +132,10 @@ module ibex_id_stage #(
     output logic [31:0]               csr_mtval_o,
     input  logic                      illegal_csr_insn_i,
 
+    output [4:0] reg_addr_a_o,
+    output [4:0] reg_addr_b_o,
+    output ibex_defines::c_exc_reg_mux_sel_e csr_reg_to_save_o,
+
     // SCR signals
     // DDC (direct data capability)
     input logic [`CAP_SIZE-1:0] scr_ddc_i,
@@ -138,8 +145,6 @@ module ibex_id_stage #(
     output ibex_defines::scr_op_e scr_op_o,
     input logic [`CAP_SIZE-1:0] scr_rdata_i,
 
-    // SCR exception signal, tells us about exceptions in the SCRs
-    input logic cheri_scr_exc_i,
 
     // Interface to load store unit
     output logic                      data_req_ex_o,
@@ -165,7 +170,6 @@ module ibex_id_stage #(
 
     input  logic                      lsu_load_err_i,
     input  logic                      lsu_store_err_i,
-    output logic cheri_exc_o,
 
     // Debug Signal
     output ibex_defines::dbg_cause_e  debug_cause_o,
@@ -297,7 +301,17 @@ module ibex_id_stage #(
   logic [`INTEGER_SIZE-1:0] pc_id_i_getOffset_o;
   logic [`FLAG_SIZE-1:0] pcc_getFlags_o;
 
-  // whether the current instruction is ddc-relative or input-relative
+
+  // cheri exception signals
+  logic      [`EXCEPTION_SIZE-1:0] cheri_exc_a;
+  logic      [`EXCEPTION_SIZE-1:0] cheri_exc_a_q; // used for latching exception info during CJALR
+  logic      [`EXCEPTION_SIZE-1:0] cheri_exc_b;
+  logic      [`EXCEPTION_SIZE-1:0] cheri_exc_mem;
+  logic [1:0][`EXCEPTION_SIZE-1:0] cheri_exc_instr;
+  logic                            cheri_exc_scr;
+
+
+  // whether the current instruction is ddc-relative or relative to the current capability
   logic mem_ddc_relative;
 
   // Data Memory Control
@@ -314,23 +328,49 @@ module ibex_id_stage #(
   logic [31:0] alu_operand_a;
   logic [31:0] alu_operand_b;
 
+
+
+  // latch exception_a value so we keep the exception information from the first stage of CJALR
+  // instructions
+  always_ff @(posedge clk_i) begin
+    if (!rst_ni) begin
+      cheri_exc_a_q = '0;
+    end else begin
+      cheri_exc_a_q = cheri_exc_a;
+    end
+  end
+
   // mask out exceptions that should not be thrown
-  assign cheri_exc_o =
-                         // don't throw CALL_TRAP or RETURN_TRAP exceptions
-                         (|cheri_exc_a_i[`EXCEPTION_SIZE-3:0] && cheri_a_en_dec)
-                      || (|cheri_exc_b_i[`EXCEPTION_SIZE-3:0] && cheri_b_en_dec)
+  always_comb begin
+    cheri_exc_a = '0;
+    cheri_exc_b = '0;
+    cheri_exc_mem = '0;
 
-                      // when executing a CJALR, keep cheri_exc_o high until we get a new instruction
-                      || ((jump_in_dec && cheri_en_o && !instr_new_i) ? cheri_exc_o : '0)
+    // we only want to pass on the instruction exceptions when we're reading in a new instruction
+    // instr_new_i goes high only after we've accepted a new instruction by asserting in_id_ready_o
+    cheri_exc_instr[0] = instr_valid_i || !instr_new_i ? cheri_exc_instr_i[0] : '0;
+    cheri_exc_instr[1] = instr_valid_i || !instr_new_i ? cheri_exc_instr_i[1] : '0;
 
-                      // only throw memory-related exceptions when accessing memory
-                      || (|cheri_exc_mem_i && data_req_dec && !lsu_addr_incr_req_i)
+    if (cheri_a_en_dec)
+      // if we were doing a CJALR, we want the exception checks from the first cycle only, since that's
+      // where it does all the checks we need
+      cheri_exc_a = ((jump_in_dec && cheri_en_o && !instr_new_i) ? cheri_exc_a_q : cheri_exc_a_i);
 
-                      // throw exceptions on instruction fetch fail
-                      || (|cheri_exc_instr_i/* && !instr_new_i*/) // TODO this can trigger even when it's not supposed to
+    if (cheri_b_en_dec)
+      cheri_exc_b = cheri_exc_b_i;
 
-                      // throw exceptions on SCR exception
-                      || cheri_scr_exc_i;
+    if (data_req_dec && !lsu_addr_incr_req_i)
+      cheri_exc_mem = cheri_exc_mem_i;
+
+    if (instr_is_compressed_i)
+      cheri_exc_instr[1] = '0;
+  end
+
+  // pass register addresses to SCRs to get cause
+  assign reg_addr_a_o = regfile_raddr_a;
+  assign reg_addr_b_o = regfile_raddr_b;
+
+
 
   // debug print
   // TODO remove, this is not really useful
@@ -706,7 +746,14 @@ module_wrap64_getAddr module_getAddr_z (
       .store_err_i                    ( lsu_store_err_i        ),
 
       // CHERI exception signals
-      .cheri_exc_i(cheri_exc_o),
+      .cheri_exc_o                    ( cheri_exc_o            ),
+      .cheri_exc_a_i                  ( cheri_exc_a            ),
+      .cheri_exc_b_i                  ( cheri_exc_b            ),
+      .cheri_exc_mem_i                ( cheri_exc_mem          ),
+      .cheri_exc_instr_i              ( cheri_exc_instr        ),
+      .cheri_exc_scr_i                ( cheri_exc_scr_i        ),
+      .cheri_cause_o                  ( cheri_cause_o          ),
+      .csr_reg_to_save_o              ( csr_reg_to_save_o      ),
 
       // jump/branch control
       .branch_set_i                   ( branch_set_q           ),

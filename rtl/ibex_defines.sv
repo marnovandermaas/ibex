@@ -340,8 +340,47 @@ typedef enum logic [5:0] {
   EXC_CAUSE_BREAKPOINT         = 6'h03,
   EXC_CAUSE_LOAD_ACCESS_FAULT  = 6'h05,
   EXC_CAUSE_STORE_ACCESS_FAULT = 6'h07,
-  EXC_CAUSE_ECALL_MMODE        = 6'h0B
+  EXC_CAUSE_ECALL_MMODE        = 6'h0B,
+  EXC_CAUSE_CHERI_EXCEPTION    = 6'h20
 } exc_cause_e;
+
+// CHERI exception cause
+typedef enum logic [4:0] {
+  CAUSE_NONE                                     = 5'h00,
+  CAUSE_LENGTH_VIOLATION                         = 5'h01,
+  CAUSE_TAG_VIOLATION                            = 5'h02,
+  CAUSE_SEAL_VIOLATION                           = 5'h03,
+  CAUSE_TYPE_VIOLATION                           = 5'h04,
+  CAUSE_CALL_TRAP                                = 5'h05,
+  CAUSE_RETURN_TRAP                              = 5'h06,
+  CAUSE_UNDERFLOW_OF_TRUSTED_SYSTEM_STACK        = 5'h07,
+  CAUSE_SOFTWARE_DEFINED_PERMISSION_VIOLATION    = 5'h08,
+  CAUSE_MMU_PROHIBITS_STORE_CAPABILITY           = 5'h09,
+  CAUSE_REPRESENTABILITY_VIOLATION               = 5'h0A,
+  CAUSE_UNALIGNED_BASE                           = 5'h0B,
+  CAUSE_GLOBAL_VIOLATION                         = 5'h10,
+  CAUSE_PERMIT_EXECUTE_VIOLATION                 = 5'h11,
+  CAUSE_PERMIT_LOAD_VIOLATION                    = 5'h12,
+  CAUSE_PERMIT_STORE_VIOLATION                   = 5'h13,
+  CAUSE_PERMIT_LOAD_CAPABILITY_VIOLATION         = 5'h14,
+  CAUSE_PERMIT_STORE_CAPABILITY_VIOLATION        = 5'h15,
+  CAUSE_PERMIT_STORE_LOCAL_CAPABILITY_VIOLATION  = 5'h16,
+  CAUSE_PERMIT_SEAL_VIOLATION                    = 5'h17,
+  CAUSE_ACCESS_SYSTEM_REGISTERS_VIOLATION        = 5'h18,
+  CAUSE_PERMIT_CCALL_VIOLATION                   = 5'h19,
+  CAUSE_ACCESS_CCALL_IDC_VIOLATION               = 5'h1A,
+  CAUSE_PERMIT_UNSEAL_VIOLATION                  = 5'h1B,
+  CAUSE_PERMIT_SET_CID_VIOLATION                 = 5'h1C
+} c_exc_cause_e;
+
+// CHERI exception source register mux
+typedef enum logic [2:0] {
+  REG_A,
+  REG_B,
+  REG_SCR,
+  REG_PCC
+} c_exc_reg_mux_sel_e;
+
 
 // Debug cause
 typedef enum logic [2:0] {

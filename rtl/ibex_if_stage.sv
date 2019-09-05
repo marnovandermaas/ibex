@@ -43,15 +43,14 @@ module ibex_if_stage #(
 
     // instruction cache interface
     output logic                      instr_req_o,
-    // this is the pcc
-    output logic [`CAP_SIZE-1:0]               instr_cap_o,
-    // this is the address that is passed to memory. This is also used to check memory access
-    // TODO need to make this an offset from the pcc.
-    // ie if this says 128 then we really want pcc.base + 128
+    // this is the pcc, used to provide authority for instruction fetches
+    output logic [`CAP_SIZE-1:0]      instr_cap_o,
+    // this is the address that is passed to memory. This is also used to check instruction memory access
     output logic [31:0]               instr_addr_o,
     input  logic                      instr_gnt_i,
     input  logic                      instr_rvalid_i,
     input  logic [31:0]               instr_rdata_i,
+    input  logic [1:0][`EXCEPTION_SIZE-1:0] exc_i,
 
     // Output of IF Pipeline stage
     output logic                      instr_valid_id_o,         // instr in IF-ID is valid
@@ -64,6 +63,7 @@ module ibex_if_stage #(
                                                                 // is a compressed instr
     output logic                      illegal_c_insn_id_o,      // compressed decoder thinks this
                                                                 // is an invalid instr
+    output logic [1:0][`EXCEPTION_SIZE-1:0] exc_o,
 
     // these have become PCCs, so we need to pass a PC for RVFI purposes.
     // this is done using the pc_next
@@ -75,6 +75,7 @@ module ibex_if_stage #(
     input  logic                      pc_set_i,                 // set the PC to a new value
     input  logic [31:0]               csr_mepc_i,               // PC to restore after handling
                                                                 // the interrupt/exception
+    input  logic [`CAP_SIZE-1:0]      scr_mepcc_i,              // PC to restore after handling
     input  logic [31:0]               csr_depc_i,               // PC to restore after handling
                                                                 // the debug request
     input  ibex_defines::pc_sel_e     pc_mux_i,                 // selector for PC multiplexer
@@ -133,12 +134,16 @@ module ibex_if_stage #(
   logic [`CAP_SIZE-1:0] curr_pc_cap_d;
   logic [`CAP_SIZE-1:0] curr_pc_cap_q;
 
+  // exceptions caused by fetching the instruction we're sending to the ID stage
+  logic [1:0][`EXCEPTION_SIZE-1:0] exc;
+
   // the target capability to set pcc to
   logic [`CAP_SIZE-1:0] jump_target;
 
   assign jump_target = cap_jump_i ? jump_target_ex_i : pc_id_o_setOffset_o;
 
   assign curr_pc_cap_d = branch_req ? fetch_addr_n : curr_pc_cap_q;
+  assign instr_cap_o   = curr_pc_cap_d;
 
   assign unused_boot_addr = boot_addr_i[7:0];
 
@@ -182,7 +187,7 @@ module ibex_if_stage #(
       PC_JUMP: fetch_addr_n = jump_target;
       PC_EXC:  fetch_addr_n = exc_pc;                       // set PC to exception handler
       // TODO need to change this back to capability stuff
-      PC_ERET: fetch_addr_n = csr_mepc_i;                   // restore PC when returning from EXC
+      PC_ERET: fetch_addr_n = scr_mepcc_i;                  // restore PC when returning from EXC
       PC_DRET: fetch_addr_n = csr_depc_i;
       default: fetch_addr_n = 'X;
     endcase
@@ -198,21 +203,23 @@ module ibex_if_stage #(
       .req_i             ( req_i                       ),
 
       .branch_i          ( branch_req                  ),
-      //.addr_i            ( {fetch_addr_n[31:1], 1'b0}  ),
-      .addr_i            ( curr_pc_cap_d ),
+      .pcc_i             ( curr_pc_cap_d               ),
 
       .ready_i           ( fetch_ready                 ),
       .valid_o           ( fetch_valid                 ),
       .rdata_o           ( fetch_rdata                 ),
-      .addr_o            ( fetch_addr                  ),
+      .pcc_o             ( fetch_addr                  ),
+      .exc_o             ( exc                         ),
 
       // goes to instruction memory / instruction cache
       .instr_req_o       ( instr_req_o                 ),
-      .instr_cap_o      ( instr_cap_o                ),
       .instr_addr_o      ( instr_addr_o                ),
       .instr_gnt_i       ( instr_gnt_i                 ),
       .instr_rvalid_i    ( instr_rvalid_i              ),
       .instr_rdata_i     ( instr_rdata_i               ),
+
+      // signal from instruction checker
+      .exc_i             ( exc_i                       ),
 
       // Prefetch Buffer Status
       .busy_o            ( prefetch_busy               )
@@ -307,6 +314,7 @@ module ibex_if_stage #(
         instr_is_compressed_id_o <= instr_is_compressed_int;
         illegal_c_insn_id_o      <= illegal_c_insn;
         pc_id_o                  <= pc_if_o;
+        exc_o                    <= exc;
       end else if (instr_valid_clear_i) begin
         instr_valid_id_o         <= 1'b0;
       end

@@ -22,6 +22,7 @@
 `define CAP_SIZE 93
 `define ALMIGHTY_CAP 93'h100000000003FFDF690003F0
 `define NULL_CAP 93'h000000000000001f690003f0
+`define OTYPE_SIZE 4
 
 /**
  * Control and Status Registers
@@ -57,6 +58,8 @@ module ibex_cs_registers #(
     input  ibex_defines::scr_op_e    scr_op_i,
     output logic [`CAP_SIZE-1:0]              scr_rdata_o,
 
+    input  ibex_defines::c_exc_cause_e cheri_cause_i,
+
     output logic [`CAP_SIZE-1:0] scr_mtcc_o,
 
     // DDC always needs to be accessible
@@ -65,9 +68,13 @@ module ibex_cs_registers #(
     // Interrupts
     output logic                     m_irq_enable_o,
     output logic [31:0]              csr_mepc_o,
+    output logic [`CAP_SIZE-1:0]              scr_mepcc_o,
 
-    // exception signal
+    // exception signal to outside
     output logic exc_o,
+
+    // exception signal from outside
+    input  logic exc_i,
 
     // debug
     input  ibex_defines::dbg_cause_e debug_cause_i,
@@ -91,6 +98,10 @@ module ibex_cs_registers #(
                                                              // with wrong priviledge level, or
                                                              // missing write permissions
     input  logic                     instr_new_id_i,         // ID stage sees a new instr
+
+    input ibex_defines::c_exc_reg_mux_sel_e reg_to_save_i,
+    input [4:0] reg_addr_a_i,
+    input [4:0] reg_addr_b_i,
 
     // Performance Counters
     input  logic                     instr_ret_i,            // instr retired in ID/EX stage
@@ -180,6 +191,8 @@ module ibex_cs_registers #(
   logic [31:0] depc_q, depc_d;
   logic [31:0] dscratch0_q, dscratch0_d;
   logic [31:0] dscratch1_q, dscratch1_d;
+
+  logic [15:5] mccsr_q, mccsr_d;
 
   //SCRs
   logic [`CAP_SIZE-1:0] mepcc_q, mepcc_d;
@@ -278,7 +291,7 @@ module ibex_cs_registers #(
       CSR_MEPC: csr_rdata_int = mepcc_offset;
 
       // mcause: exception cause
-      CSR_MCAUSE: csr_rdata_int = {mcause_q[5], 26'b0, mcause_q[4:0]};
+      CSR_MCAUSE: csr_rdata_int = {26'b0, mcause_q[5], mcause_q[4:0]};
 
       // mtval: trap value
       CSR_MTVAL: csr_rdata_int = mtval_q;
@@ -295,6 +308,8 @@ module ibex_cs_registers #(
       CSR_MINSTRET:      csr_rdata_int = mhpmcounter_q[2][31: 0];
       CSR_MINSTRETH:     csr_rdata_int = mhpmcounter_q[2][63:32];
 
+      // TODO remove replication and use constants
+      CSR_MCCSR: csr_rdata_int = {16'h0, mccsr_q[15:5], 3'h0, 2'b11};
 
       default: begin
         if ((csr_addr & CSR_MASK_MCOUNTER) == CSR_OFF_MCOUNTER_SETUP) begin
@@ -357,12 +372,9 @@ module ibex_cs_registers #(
 
   // write logic
   always_comb begin
-  temp_setOffset_i = '0;
-  temp_setOffset_cap = '0;
-  temp_getOffset_i = '0;
-
-
-
+    temp_setOffset_i = '0;
+    temp_setOffset_cap = '0;
+    temp_getOffset_i = '0;
 
     exception_pc = pc_id_i;
 
@@ -392,6 +404,7 @@ module ibex_cs_registers #(
     sscratchc_d = sscratchc_q;
     sepcc_d = sepcc_q;
 
+    nullWithAddr_i = '0;
 
 
 
@@ -417,6 +430,7 @@ module ibex_cs_registers #(
       //CSR_MEPC: if (csr_we_int) mepc_d = {csr_wdata_int[31:1], 1'b0};
       CSR_MEPC: begin
       if (csr_we_int)
+          $display("writing 0x%h to MEPC", csr_wdata_int);
           temp_setOffset_cap = mepcc_q;
           temp_setOffset_i = {csr_wdata_int[31:1], 1'b0};
           mepcc_d = temp_setOffset_o;
@@ -505,6 +519,8 @@ module ibex_cs_registers #(
         end
       end
 
+      CSR_MCCSR: begin end
+
       default: begin
         if (csr_we_int == 1'b1) begin
           // performance counters and event selector
@@ -519,69 +535,77 @@ module ibex_cs_registers #(
 
     unique case (scr_addr_i)
       SCR_DDC: begin
-        if (scr_we_int && !exc_o) begin
+        if (scr_we_int && !exc_i && !exc_o) begin
           ddc_d = scr_wdata_i;
         end
       end
 
       // TODO look at these again
       SCR_MEPCC: begin
-        if (scr_we_int && !exc_o) begin
-          //mepcc_d = scr_wdata_i;
-
-          temp_getOffset_i = scr_wdata_i;
-          temp_setOffset_cap = scr_wdata_i;
-          temp_setOffset_i = {temp_getOffset_o[31:1], 1'b0};
-          mepcc_d = temp_setOffset_o;
+        if (scr_we_int && !exc_i && !exc_o) begin
+          if (wdata_isSealed_o == 1'b1) begin
+            nullWithAddr_i = {wdata_getAddr_o[31:1], 1'b0};
+            mepcc_d = nullWithAddr_o;
+          end else begin
+            temp_getOffset_i = scr_wdata_i;
+            temp_setOffset_cap = scr_wdata_i;
+            temp_setOffset_i = {temp_getOffset_o[31:1], 1'b0};
+            mepcc_d = temp_setOffset_o;
+          end
         end
       end
 
       SCR_MTCC: begin
-        if (scr_we_int && !exc_o) begin
-          temp_getOffset_i = scr_wdata_i;
-          temp_setOffset_cap = scr_wdata_i;
+        if (scr_we_int && !exc_i && !exc_o) begin
           // Sail allows setting the vectored/direct mode of mtvec and mtcc. allow it for now
           // Sail also sets the mode to direct when an instruction tries to set it to a reserved
           // value. For now, define this as our behaviour as well
           //temp_setOffset_i = {temp_getOffset_o[31:2], 2'b01};
-          temp_setOffset_i = {temp_getOffset_o[31:2], 1'b0, !temp_getOffset_o[1] && temp_getOffset_o[0]};
-          mtcc_d = temp_setOffset_o;
+          if (wdata_isSealed_o) begin
+            nullWithAddr_i = {wdata_getAddr_o[31:2], 1'b0, !wdata_getAddr_o[1] && wdata_getAddr_o[0]};
+            mtcc_d = nullWithAddr_o;
+          end else begin
+            temp_getOffset_i = scr_wdata_i;
+            temp_setOffset_cap = scr_wdata_i;
+            temp_setOffset_i = {temp_getOffset_o[31:2], 1'b0, !temp_getOffset_o[1] && temp_getOffset_o[0]};
+            mtcc_d = temp_setOffset_o;
+          end
         end
       end
 
       SCR_MTDC: begin
-        if (scr_we_int && !exc_o) begin
+        if (scr_we_int && !exc_i && !exc_o) begin
           mtdc_d = scr_wdata_i;
         end
       end
 
       SCR_MSCRATCHC: begin
-        if (scr_we_int && !exc_o) begin
+        if (scr_we_int && !exc_i && !exc_o) begin
           mscratchc_d = scr_wdata_i;
         end
       end
 
       // TODO REMOVE THESE EVENTUALLY
       SCR_UEPCC: begin
-        if (scr_we_int && !exc_o) begin
+        if (scr_we_int && !exc_i && !exc_o) begin
           uepcc_d = scr_wdata_i;
         end
       end
 
       SCR_UTCC: begin
-        if (scr_we_int && !exc_o) begin
+        if (scr_we_int && !exc_i && !exc_o) begin
           utcc_d = scr_wdata_i;
         end
       end
 
       SCR_UTDC: begin
-        if (scr_we_int && !exc_o) begin
+        if (scr_we_int && !exc_i && !exc_o) begin
           utdc_d = scr_wdata_i;
         end
       end
 
       SCR_USCRATCHC: begin
-        if (scr_we_int && !exc_o) begin
+        if (scr_we_int && !exc_i && !exc_o) begin
           uscratchc_d = scr_wdata_i;
         end
       end
@@ -589,25 +613,25 @@ module ibex_cs_registers #(
 
 
       SCR_SEPCC: begin
-        if (scr_we_int && !exc_o) begin
+        if (scr_we_int && !exc_i && !exc_o) begin
           sepcc_d = scr_wdata_i;
         end
       end
 
       SCR_STCC: begin
-        if (scr_we_int && !exc_o) begin
+        if (scr_we_int && !exc_i && !exc_o) begin
           stcc_d = scr_wdata_i;
         end
       end
 
       SCR_STDC: begin
-        if (scr_we_int && !exc_o) begin
+        if (scr_we_int && !exc_i && !exc_o) begin
           stdc_d = scr_wdata_i;
         end
       end
 
       SCR_SSCRATCHC: begin
-        if (scr_we_int && !exc_o) begin
+        if (scr_we_int && !exc_i && !exc_o) begin
           sscratchc_d = scr_wdata_i;
         end
       end
@@ -648,6 +672,12 @@ module ibex_cs_registers #(
           mepcc_d = pc_id_i;
           mcause_d       = {csr_mcause_i};
           mtval_d        = csr_mtval_i;
+          mccsr_d[ 9: 5] = cheri_cause_i;
+          mccsr_d[15:10] = reg_to_save_i == REG_A   ? {1'b0, reg_addr_a_i}
+                         : reg_to_save_i == REG_B   ? {1'b0, reg_addr_b_i}
+                         : reg_to_save_i == REG_SCR ? {1'b1,   scr_addr_i}
+                         : reg_to_save_i == REG_PCC ? {1'b1,         5'b0}
+                                                    :                6'b0;
         end
       end //csr_save_cause_i
 
@@ -695,6 +725,7 @@ module ibex_cs_registers #(
   assign m_irq_enable_o = mstatus_q.mie;
   assign csr_mepc_o     = mepc_q;
   assign csr_depc_o     = depc_q;
+  assign scr_mepcc_o = mepcc_q;
 
   assign debug_single_step_o  = dcsr_q.step;
   assign debug_ebreakm_o      = dcsr_q.ebreakm;
@@ -720,6 +751,8 @@ module ibex_cs_registers #(
       depc_q     <= '0;
       dscratch0_q <= '0;
       dscratch1_q <= '0;
+      mccsr_q <= '0;
+
       // TODO capability reset
       ddc_q <= `ALMIGHTY_CAP;
       mepcc_q <= `ALMIGHTY_CAP;
@@ -756,6 +789,7 @@ module ibex_cs_registers #(
       mtcc_q <= mtcc_d;
       mscratchc_q <= mscratchc_d;
       mtdc_q <= mtdc_d;
+      mccsr_q <= mccsr_d;
 
       // TODO REMOVE THESE EVENTUALLY
       uepcc_q <= uepcc_d;
@@ -771,6 +805,8 @@ module ibex_cs_registers #(
 
 
   // Deal with exceptions when trying to access SCRs
+    // TODO check for AccessSystemRegs
+    // probably easiest to do in CHERI ALU
   always_comb begin
     exc_o = scr_addr_i == '0 && (scr_op_i == SCR_WRITE || scr_op_i == SCR_READWRITE)
           // TODO change this 10 to something else
@@ -922,6 +958,21 @@ module_wrap64_getPerms module_wrap64_getPerms_pc_id_i (
   .wrap64_getPerms_cap(pc_id_i),
     .wrap64_getPerms(pc_id_i_getPerms_o));
 
+logic [`OTYPE_SIZE-1:0] wdata_isSealed_o;
+module_wrap64_isSealed module_wrap64_isSealed_b (
+  .wrap64_isSealed_cap(scr_wdata_i),
+    .wrap64_isSealed(wdata_isSealed_o));
+
+logic [`INTEGER_SIZE-1:0] wdata_getAddr_o;
+module_wrap64_getAddr module_wrap64_getAddr (
+  .wrap64_getAddr_cap(scr_wdata_i),
+    .wrap64_getAddr(wdata_getAddr_o));
+
+  logic [`INTEGER_SIZE-1:0] nullWithAddr_i;
+  logic [`CAP_SIZE-1:0] nullWithAddr_o;
+  module_wrap64_nullWithAddr nullWithAddr (
+        .wrap64_nullWithAddr_addr   (nullWithAddr_i),
+        .wrap64_nullWithAddr        (nullWithAddr_o));
 
 
 

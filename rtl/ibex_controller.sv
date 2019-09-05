@@ -65,9 +65,15 @@ module ibex_controller (
     input  logic                      store_err_i,
 
     // CHERI exception signals
-    input logic cheri_exc_i,
-    //input  logic [`EXCEPTION_SIZE-1:0] cheri_exc_a_i,
-    //input  logic [`EXCEPTION_SIZE-1:0] cheri_exc_b_i,
+    input logic      [`EXCEPTION_SIZE-1:0] cheri_exc_a_i,
+    input logic      [`EXCEPTION_SIZE-1:0] cheri_exc_b_i,
+    input logic      [`EXCEPTION_SIZE-1:0] cheri_exc_mem_i,
+    input logic [1:0][`EXCEPTION_SIZE-1:0] cheri_exc_instr_i,
+    input logic                            cheri_exc_scr_i,
+
+    output logic cheri_exc_o,
+    output ibex_defines::c_exc_cause_e cheri_cause_o,
+    output ibex_defines::c_exc_reg_mux_sel_e csr_reg_to_save_o,
 
     // jump/branch signals
     input  logic                      branch_set_i,          // branch taken set signal
@@ -138,6 +144,10 @@ module ibex_controller (
   logic enter_debug_mode;
   logic handle_irq;
 
+  // assigned at the bottom
+  c_exc_cause_e cheri_cause;
+  c_exc_reg_mux_sel_e csr_reg_to_save;
+
 `ifndef SYNTHESIS
   // synopsys translate_off
   // make sure we are called later so that we do not generate messages for
@@ -160,7 +170,7 @@ module ibex_controller (
   assign store_err_d = store_err_i;
 
   // exception requests
-  assign exc_req     = ecall_insn_i | ebrk_insn_i | illegal_insn_i | cheri_exc_i;
+  assign exc_req     = ecall_insn_i | ebrk_insn_i | illegal_insn_i | cheri_exc_o;
 
   // LSU exception requests
   assign exc_req_lsu = store_err_i | load_err_i;
@@ -296,7 +306,7 @@ module ibex_controller (
         if (instr_valid_i) begin
 
           // set PC in IF stage to branch or jump target
-          if ((branch_set_i || jump_set_i) && !cheri_exc_i) begin
+          if ((branch_set_i || jump_set_i) && !cheri_exc_o) begin
             pc_mux_o       = PC_JUMP;
             pc_set_o       = 1'b1;
 
@@ -484,9 +494,11 @@ module ibex_controller (
             end
 
           // deal with CHERI exceptions
-          end else if (cheri_exc_i) begin
+          end else if (cheri_exc_o) begin
+            exc_cause_o = EXC_CAUSE_CHERI_EXCEPTION;
+            cheri_cause_o = cheri_cause;
+            csr_reg_to_save_o = csr_reg_to_save;
             pc_set_o = 1'b1;
-
           end else if (store_err_q) begin
             exc_cause_o = EXC_CAUSE_STORE_ACCESS_FAULT;
             csr_mtval_o = lsu_addr_last_i;
@@ -557,5 +569,164 @@ module ibex_controller (
       store_err_q  <= store_err_d;
     end
   end
+
+
+
+  assign cheri_exc_o = |cheri_exc_a_i || |cheri_exc_b_i || |cheri_exc_scr_i || |cheri_exc_mem_i || |cheri_exc_instr_i;
+
+  always_comb begin
+    // TODO check for AccessSystemRegs
+    if ('0/*TODO replace with check for ASR*/) begin
+
+    end else if (cheri_exc_a_i[TAG_VIOLATION]) begin
+      cheri_cause =      CAUSE_TAG_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[TAG_VIOLATION]) begin
+      cheri_cause =      CAUSE_TAG_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[SEAL_VIOLATION]) begin
+      cheri_cause =      CAUSE_SEAL_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[SEAL_VIOLATION]) begin
+      cheri_cause =      CAUSE_SEAL_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[TYPE_VIOLATION]) begin
+      cheri_cause =      CAUSE_TYPE_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[TYPE_VIOLATION]) begin
+      cheri_cause =      CAUSE_TYPE_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[PERMIT_SEAL_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_SEAL_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[PERMIT_SEAL_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_SEAL_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[PERMIT_CCALL_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_CCALL_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[PERMIT_CCALL_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_CCALL_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[ACCESS_CCALL_IDC_VIOLATION]) begin
+      cheri_cause =      CAUSE_ACCESS_CCALL_IDC_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[ACCESS_CCALL_IDC_VIOLATION]) begin
+      cheri_cause =      CAUSE_ACCESS_CCALL_IDC_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[PERMIT_UNSEAL_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_UNSEAL_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[PERMIT_UNSEAL_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_UNSEAL_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    // TODO these names don't match in ibex_defines, rewrite?
+    end else if (cheri_exc_a_i[PERMIT_SETSID_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_SET_CID_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[PERMIT_SETSID_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_SET_CID_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[PERMIT_EXECUTE_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_EXECUTE_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[PERMIT_EXECUTE_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_EXECUTE_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[PERMIT_LOAD_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_LOAD_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[PERMIT_LOAD_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_LOAD_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[PERMIT_STORE_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_STORE_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[PERMIT_STORE_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_STORE_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[PERMIT_LOAD_CAPABILITY_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_LOAD_CAPABILITY_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[PERMIT_LOAD_CAPABILITY_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_LOAD_CAPABILITY_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[PERMIT_STORE_CAPABILITY_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_STORE_CAPABILITY_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[PERMIT_STORE_CAPABILITY_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_STORE_CAPABILITY_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[PERMIT_STORE_LOCAL_CAPABILITY_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_STORE_LOCAL_CAPABILITY_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[PERMIT_STORE_LOCAL_CAPABILITY_VIOLATION]) begin
+      cheri_cause =      CAUSE_PERMIT_STORE_LOCAL_CAPABILITY_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[GLOBAL_VIOLATION]) begin
+      cheri_cause =      CAUSE_GLOBAL_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[GLOBAL_VIOLATION]) begin
+      cheri_cause =      CAUSE_GLOBAL_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[LENGTH_VIOLATION]) begin
+      cheri_cause =      CAUSE_LENGTH_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[LENGTH_VIOLATION]) begin
+      cheri_cause =      CAUSE_LENGTH_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[INEXACT_BOUNDS_VIOLATION]) begin
+      cheri_cause =      CAUSE_REPRESENTABILITY_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[INEXACT_BOUNDS_VIOLATION]) begin
+      cheri_cause =      CAUSE_REPRESENTABILITY_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[SOFTWARE_DEFINED_VIOLATION]) begin
+      cheri_cause =      CAUSE_SOFTWARE_DEFINED_PERMISSION_VIOLATION;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[SOFTWARE_DEFINED_VIOLATION]) begin
+      cheri_cause =      CAUSE_SOFTWARE_DEFINED_PERMISSION_VIOLATION;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[MMU_PROHIBITS_STORE_VIOLATION]) begin
+      cheri_cause =      CAUSE_MMU_PROHIBITS_STORE_CAPABILITY;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[MMU_PROHIBITS_STORE_VIOLATION]) begin
+      cheri_cause =      CAUSE_MMU_PROHIBITS_STORE_CAPABILITY;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[CALL_TRAP]) begin
+      cheri_cause =      CAUSE_CALL_TRAP;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[CALL_TRAP]) begin
+      cheri_cause =      CAUSE_CALL_TRAP;
+      csr_reg_to_save = REG_B;
+
+    end else if (cheri_exc_a_i[RETURN_TRAP]) begin
+      cheri_cause =      CAUSE_RETURN_TRAP;
+      csr_reg_to_save = REG_A;
+    end else if (cheri_exc_b_i[RETURN_TRAP]) begin
+      cheri_cause =      CAUSE_RETURN_TRAP;
+      csr_reg_to_save = REG_B;
+   end
+  end
+
 
 endmodule

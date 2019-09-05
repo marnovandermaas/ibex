@@ -37,20 +37,28 @@ module ibex_prefetch_buffer (
     input  logic        req_i,
 
     input  logic        branch_i,
-    input  logic [`CAP_SIZE-1:0] addr_i,
 
+    // pcc being used to fetch instruction
+    input  logic [`CAP_SIZE-1:0] pcc_i,
+
+    // exceptions caused by current pcc fetch
+    input  logic [1:0][`EXCEPTION_SIZE-1:0] exc_i,
 
     input  logic        ready_i,
     output logic        valid_o,
     output logic [31:0] rdata_o,
-    output logic [`CAP_SIZE-1:0] addr_o,
+    // pcc of instruction being sent to ID stage
+    output logic [`CAP_SIZE-1:0] pcc_o,
+
+    // exceptions caused by fetching instruction that is now being sent to ID stage
+    output logic [1:0][`EXCEPTION_SIZE-1:0] exc_o,
 
 
     // goes to instruction memory / instruction cache
     output logic        instr_req_o,
     input  logic        instr_gnt_i,
     output logic [31:0] instr_addr_o,
-    output logic [`CAP_SIZE:0] instr_cap_o,
+    // capability used to provide authority for instruction fetch
     input  logic [31:0] instr_rdata_i,
     input  logic        instr_rvalid_i,
 
@@ -71,6 +79,11 @@ module ibex_prefetch_buffer (
   logic        fifo_valid;
   logic        fifo_ready;
   logic        fifo_clear;
+
+  // the instruction checker returns something immediately, so we latch it in order to line
+  // up the exception signal with the instruction arriving
+  logic [1:0][`EXCEPTION_SIZE-1:0] exc_q, exc_n;
+  assign exc_n = exc_i;
 
   logic [31:0] addr_fifo;
 
@@ -94,13 +107,15 @@ module ibex_prefetch_buffer (
 
       .in_addr_i             ( instr_addr_q      ),
       .in_rdata_i            ( instr_rdata_i     ),
+      .in_exc_i              ( exc_q             ),
       .in_valid_i            ( fifo_valid        ),
       .in_ready_o            ( fifo_ready        ),
 
       .out_valid_o           ( valid_o           ),
       .out_ready_i           ( ready_i           ),
       .out_rdata_o           ( rdata_o           ),
-      .out_addr_o            ( addr_fifo            ),
+      .out_exc_o             ( exc_o             ),
+      .out_addr_o            ( addr_fifo         ),
 
       .out_valid_stored_o    (                   )
   );
@@ -135,7 +150,7 @@ module ibex_prefetch_buffer (
         instr_req_o = 1'b0;
 
         if (branch_i) begin
-          instr_addr = addr_i_getAddr_o;
+          instr_addr = pcc_i_getAddr_o;
         end
 
         if (req_i && (fifo_ready || branch_i )) begin
@@ -154,7 +169,7 @@ module ibex_prefetch_buffer (
         instr_req_o = 1'b1;
 
         if (branch_i) begin
-          instr_addr = addr_i_getAddr_o;
+          instr_addr = pcc_i_getAddr_o;
           addr_valid = 1'b1;
         end
 
@@ -167,7 +182,7 @@ module ibex_prefetch_buffer (
         instr_addr = fetch_addr;
 
         if (branch_i) begin
-          instr_addr = addr_i_getAddr_o;
+          instr_addr = pcc_i_getAddr_o;
         end
 
         if (req_i && (fifo_ready || branch_i)) begin
@@ -205,7 +220,7 @@ module ibex_prefetch_buffer (
         instr_addr = instr_addr_q;
 
         if (branch_i) begin
-          instr_addr = addr_i_getAddr_o;
+          instr_addr = pcc_i_getAddr_o;
           addr_valid = 1'b1;
         end
 
@@ -232,8 +247,10 @@ module ibex_prefetch_buffer (
     if (!rst_ni) begin
       pf_fsm_cs      <= IDLE;
       instr_addr_q   <= '0;
+      exc_q          <= '0;
     end else begin
       pf_fsm_cs      <= pf_fsm_ns;
+      exc_q          <= exc_n;
 
       if (addr_valid) begin
         instr_addr_q <= instr_addr;
@@ -245,46 +262,24 @@ module ibex_prefetch_buffer (
   // Output Addr //
   /////////////////
   assign instr_addr_w_aligned = {instr_addr[31:2], 2'b00};
-
   assign instr_addr_o         =  instr_addr_w_aligned;
 
-
-// TODO change to offset
-  // update the output pcc
-  // this is the pcc of the instruction that is currently being fed to the if stage for it to feed
-  // to the id stage.
+  // update the output pcc that will be sent to the ID stage
   always_comb begin
-    pcc_setAddr1_i = addr_fifo;
-    addr_o = pcc_setAddr1_o[`CAP_SIZE-1:0];
+    pcc_setAddr_i = addr_fifo;
+    pcc_o = pcc_setAddr_o[`CAP_SIZE-1:0];
   end
 
-  // update the output capability
-  // this is the capability that is used for accessing memory. this is different to the capability
-  // above because this one will always be word-aligned since we only do word-aligned accesses
-  always_comb begin
-    pcc_setAddr2_i = instr_addr_w_aligned;
-    instr_cap_o = pcc_setAddr2_o[`CAP_SIZE-1:0];
-  end
+  logic [31:0] pcc_i_getAddr_o;
+  module_wrap64_getAddr module_getAddr_pcc_i (
+        .wrap64_getAddr_cap(pcc_i),
+        .wrap64_getAddr(pcc_i_getAddr_o));
 
-
-logic [31:0] addr_i_getAddr_o;
-module_wrap64_getAddr module_getAddr_addr_i (
-    .wrap64_getAddr_cap(addr_i),
-    .wrap64_getAddr(addr_i_getAddr_o));
-
-logic [`CAP_SIZE-1:0] pcc_setAddr1_i;
-logic [`CAP_SIZE:0] pcc_setAddr1_o;
-module_wrap64_setAddr pcc_setAddr1 (
-                .wrap64_setAddr_cap(addr_i),
-			    .wrap64_setAddr_addr(pcc_setAddr1_i),
-			    .wrap64_setAddr(pcc_setAddr1_o));
-
-logic [`CAP_SIZE-1:0] pcc_setAddr2_i;
-logic [`CAP_SIZE:0] pcc_setAddr2_o;
-module_wrap64_setAddr pcc_setAddr2 (
-                .wrap64_setAddr_cap(addr_i),
-			    .wrap64_setAddr_addr(pcc_setAddr2_i),
-			    .wrap64_setAddr(pcc_setAddr2_o));
-
+  logic [`CAP_SIZE-1:0] pcc_setAddr_i;
+  logic [`CAP_SIZE:0] pcc_setAddr_o;
+  module_wrap64_setAddr pcc_setAddr (
+        .wrap64_setAddr_cap(pcc_i),
+        .wrap64_setAddr_addr(pcc_setAddr_i),
+        .wrap64_setAddr(pcc_setAddr_o));
 
 endmodule

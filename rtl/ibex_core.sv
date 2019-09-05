@@ -238,6 +238,7 @@ module ibex_core #(
 
   // Interrupts
   logic        m_irq_enable;
+  logic [`CAP_SIZE-1:0] scr_mepcc;
   logic [31:0] csr_mepc, csr_depc;
 
   logic        csr_save_if;
@@ -366,6 +367,8 @@ module ibex_core #(
       .instr_rvalid_i           ( instr_rvalid_i         ),
       .instr_rdata_i            ( instr_rdata_i          ),
 
+      .exc_i({cheri_exc_instr_lo, cheri_exc_instr_hi}),
+
       // outputs to ID stage
       .instr_valid_id_o         ( instr_valid_id         ),
       .instr_new_id_o           ( instr_new_id           ),
@@ -375,6 +378,8 @@ module ibex_core #(
       .illegal_c_insn_id_o      ( illegal_c_insn_id      ),
       .pc_if_o                  ( pc_if                  ),
       .pc_id_o                  ( pc_id                  ),
+
+      .exc_o(cheri_exc_instr_to_id),
 
       // control signals
       .instr_valid_clear_i      ( instr_valid_clear      ),
@@ -388,6 +393,7 @@ module ibex_core #(
       .cap_jump_i(cap_jump),
 
       // CSRs
+      .scr_mepcc_i              ( scr_mepcc              ), // exception return address
       .csr_mepc_i               ( csr_mepc               ), // exception return address
       .csr_depc_i               ( csr_depc               ), // debug return address
       .csr_mtvec_o              ( csr_mtvec              ), // trap-vector base address
@@ -471,8 +477,9 @@ module ibex_core #(
       .cheri_exc_a_i(cheri_exc_a),
       .cheri_exc_b_i(cheri_exc_b),
       .cheri_exc_o(cheri_exc),
-      .cheri_exc_mem_i(cheri_data_exc),
-      .cheri_exc_instr_i(cheri_instr_exc),
+      .cheri_exc_mem_i(cheri_exc_data),
+      .cheri_exc_instr_i(cheri_exc_instr_to_id),
+      .cheri_cause_o(cheri_cause),
       .cheri_wrote_cap_i(cheri_wrote_cap),
 
       .use_cap_base_o(use_cap_base),
@@ -490,13 +497,17 @@ module ibex_core #(
       .csr_mtval_o                  ( csr_mtval              ),
       .illegal_csr_insn_i           ( illegal_csr_insn_id    ),
 
+      .csr_reg_to_save_o(csr_reg_to_save),
+      .reg_addr_a_o(reg_addr_a),
+      .reg_addr_b_o(reg_addr_b),
+
       // SCR interface
       .scr_access_o (scr_access),
       .scr_op_o (scr_op),
       .scr_rdata_i (scr_rdata),
 
       .scr_ddc_i (scr_ddc),
-      .cheri_scr_exc_i(scr_exc),
+      .cheri_exc_scr_i(exc_scr),
 
       // LSU
       .data_req_ex_o                ( data_req_ex            ), // to load store unit
@@ -638,7 +649,7 @@ module ibex_core #(
 
       .data_cap_i (mem_cap),
       .use_cap_base_i (use_cap_base),
-      .cheri_mem_exc_i(cheri_data_exc),
+      .cheri_mem_exc_i(cheri_exc_data),
 
       .addr_incr_req_o       ( lsu_addr_incr_req   ),
       .addr_last_o           ( lsu_addr_last       ),
@@ -671,7 +682,12 @@ module ibex_core #(
   scr_num_e scr_addr;
   scr_op_e scr_op;
   logic scr_access;
-  logic scr_exc;
+  logic exc_scr;
+  c_exc_cause_e cheri_cause;
+  c_exc_reg_mux_sel_e csr_reg_to_save;
+
+  logic [4:0] reg_addr_a;
+  logic [4:0] reg_addr_b;
 
   ibex_cs_registers #(
       .MHPMCounterNum   ( MHPMCounterNum   ),
@@ -699,13 +715,18 @@ module ibex_core #(
       .scr_wdata_i (scr_wdata),
       .scr_op_i (scr_op),
       .scr_rdata_o (scr_rdata),
-      .exc_o(scr_exc),
+
+      .cheri_cause_i(cheri_cause),
+
+      .exc_i(lsu_store_err || lsu_load_err || cheri_exc || illegal_insn_id),
+      .exc_o(exc_scr),
 
       .scr_ddc_o (scr_ddc),
       .scr_mtcc_o(scr_mtcc),
 
       // Interrupt related control signals
       .m_irq_enable_o          ( m_irq_enable           ),
+      .scr_mepcc_o             ( scr_mepcc              ),
       .csr_mepc_o              ( csr_mepc               ),
 
       // debug
@@ -730,6 +751,10 @@ module ibex_core #(
 
       .instr_new_id_i          ( instr_new_id           ),
 
+      .reg_to_save_i(csr_reg_to_save),
+      .reg_addr_a_i(reg_addr_a),
+      .reg_addr_b_i(reg_addr_b),
+
       // performance counter related signals
       .instr_ret_i             ( instr_ret              ),
       .instr_ret_compressed_i  ( instr_ret_compressed   ),
@@ -747,8 +772,11 @@ module ibex_core #(
   // Memory access checkers
   ///////
 
-  logic [`EXCEPTION_SIZE-1:0] cheri_data_exc;
-  logic [`EXCEPTION_SIZE-1:0] cheri_instr_exc;
+  logic      [`EXCEPTION_SIZE-1:0] cheri_exc_data;
+  logic      [`EXCEPTION_SIZE-1:0] cheri_exc_instr_lo;
+  logic      [`EXCEPTION_SIZE-1:0] cheri_exc_instr_hi;
+  logic [1:0][`EXCEPTION_SIZE-1:0] cheri_exc_instr_to_id;
+
   logic [`CAP_SIZE-1:0] instr_cap;
   logic [`CAP_SIZE-1:0] mem_cap;
   logic mem_cap_access;
@@ -778,20 +806,15 @@ module ibex_core #(
       .mem_data_o(data_wdata_o),
       .mem_tag_o(data_wtag_o),
       .lsu_data_o(data_rdata),
-      .cheri_mem_exc_o(cheri_data_exc)
+      .cheri_mem_exc_o(cheri_exc_data)
   );
 
   ibex_cheri_memchecker #(
       .DATA_MEM(1'b0)
-  ) instr_checker (
-      // TODO this breaks when we try to jump since we're fetching an instruction which we wanted to fetch using
-      // a different PCC
+  ) instr_checker_lo (
       .cap_base_i(instr_cap),
       .address_i(instr_addr_o),
-      // TODO if we want to properly implement compressed instructions we're going to have to pass in
-      // a proper type
-      // for now just always say word
-      .data_type_i(2'b0),
+      .data_type_i(2'b01),
       .data_be_i(),
       .data_be_o(),
 
@@ -806,7 +829,31 @@ module ibex_core #(
       .mem_data_o(),
       .mem_tag_o(),
       .lsu_data_o(),
-      .cheri_mem_exc_o(cheri_instr_exc)
+      .cheri_mem_exc_o(cheri_exc_instr_lo)
+  );
+
+
+  ibex_cheri_memchecker #(
+      .DATA_MEM(1'b0)
+  ) instr_checker_hi (
+      .cap_base_i(instr_cap),
+      .address_i(instr_addr_o + 'h2),
+      .data_type_i(2'b01),
+      .data_be_i(),
+      .data_be_o(),
+
+      // we never write instructions
+      .write_i('0),
+      // likewise, we never read capabilities from the instruction stream
+      .access_capability_i('0),
+      .mem_data_i(),
+      .mem_tag_i('0),
+      .lsu_data_i(),
+
+      .mem_data_o(),
+      .mem_tag_o(),
+      .lsu_data_o(),
+      .cheri_mem_exc_o(cheri_exc_instr_hi)
   );
 
 `ifdef RVFI
