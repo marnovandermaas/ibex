@@ -113,9 +113,8 @@ module ibex_cheri_memchecker #(
   assign cheri_mem_exc_o[PERMIT_LOAD_VIOLATION] = !write_i && !base_getPerms_o[2];
   assign cheri_mem_exc_o[PERMIT_STORE_VIOLATION] = write_i && !base_getPerms_o[3];
   assign cheri_mem_exc_o[PERMIT_EXECUTE_VIOLATION] = DATA_MEM == 1'b0 && !base_getPerms_o[1];
-  // TODO enable bounds checking for instruction fetch later
-  assign cheri_mem_exc_o[LENGTH_VIOLATION] =  (DATA_MEM == 1'b1 && address_i < base_getBase_o)
-                                           || (DATA_MEM == 1'b1 && address_i + data_size > base_getTop_o);
+  assign cheri_mem_exc_o[LENGTH_VIOLATION] =  (address_i < base_getBase_o)
+                                           || (address_i + data_size > base_getTop_o);
 
   // TODO remove
   // temporarily throw trap on an unaligned access
