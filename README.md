@@ -8,7 +8,9 @@ the RV32IMC instruction set architecture.
 Ibex offers several configuration parameters to meet the needs of various application scenarios.
 The options include two different choices for the architecture of the multiplier and divider unit,
 as well as the possibility to drop the support for the "M" extension completely. In addition, the
-"E" extension can be enabled when opting for a minimum-area configuration.
+"E" extension can be enabled when opting for a minimum-area configuration. (Note this is not
+compatible with CHERI - at least one instruction explicitly uses register number 31 to return a
+value)
 
 This core was initially developed as part of the [PULP platform](https://wwww.pulp-platform.org)
 under the name "Zero-riscy" \[[1](https://doi.org/10.1109/PATMOS.2017.8106976)\], and has been
@@ -16,15 +18,35 @@ contributed to [lowRISC](https://www.lowrisc.org) who maintains it and develops 
 under active development, with further code cleanups, feature additions, and test and verification
 planned for the future.
 
+## Completion
+
+Currently the core is capable of running CHERI FreeRTOS, a version of FreeRTOS compiled using
+CHERI instructions.
+There are many TODOs written throughout the code, along with some (hopefully) useful comments
+explaining my though processes when implementing some features.
+
+The following are known to not yet be implemented:
+* CHERI Clear instruction
+* DEPCC and by extension DEPC
+* Currently, the core is not throwing an exception if a RISC-V jump/branch causes the PCC to go
+  out of bounds
+* MTVAL has not been extended for CHERI instructions
+* MCCSR and MCAUSE are not yet being set on CHERI memory exceptions or instruction fetch exceptions
+
+The memory interface has also been widened to 65 bits - 64 data bits and 1 tag bit. This is
+reflected in ```ibex_core.sv``` by a 64 bit wide data signal and a 1 bit tag signal for
+each of the read and write connections. In the Avalon toplevel, there is only a 64 bit data
+interface and tags are handled by a tag memory instantiated within the Avalon toplevel.
+
+This version of the Ibex core has also been modified slightly in order to allow it to compile in
+Quartus. In order to compile and build with Quartus, the QUARTUS macro must be defined in the
+project settings.
+
 ## Documentation
 
 The Ibex user manual can be
 [read online at ReadTheDocs](https://ibex-core.readthedocs.io/en/latest/). It is also contained in
 the `doc` folder of this repository.
-
-This version of the Ibex core has been modified slightly in order to allow it to compile in quartus.
-In order to compile and build with quartus, the QUARTUS macro must be defined in the project
-settings.
 
 ## Contributing
 
