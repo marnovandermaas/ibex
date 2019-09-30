@@ -39,6 +39,7 @@
 `define PERMIT_UNSEAL_INDEX 9
 `define PERMIT_EXECUTE_INDEX 1
 `define PERMIT_CCALL_INDEX 8
+`define PERMIT_GLOBAL_INDEX 0
 `define MIN_INSTR_BYTES 2
 // TODO change this back to 'hb, changed here to agree with piccolo
 `define MAX_OTYPE `INTEGER_SIZE'hc
@@ -305,7 +306,9 @@ logic [`CAP_SIZE:0] b_setAddr_o;
           end
 
           C_UNSEAL: begin
-            a_setType_cap_i = operand_a_i;
+            a_setPerms_i = a_getPerms_o;
+            a_setPerms_i[`PERMIT_GLOBAL_INDEX] = a_getPerms_o[`PERMIT_GLOBAL_INDEX] & b_getPerms_o[`PERMIT_GLOBAL_INDEX];
+            a_setType_cap_i = a_setPerms_o;
             a_setType_i = {`OTYPE_SIZE{1'b1}};
             returnvalue_o = a_setType_o;
             wroteCapability = 1'b1;
