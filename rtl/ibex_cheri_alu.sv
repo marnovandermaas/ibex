@@ -512,28 +512,10 @@ logic [`CAP_SIZE:0] b_setAddr_o;
             //$display("ctestsubset output: %h   exceptions: %h   exceptions_b: %h", returnvalue_o, exceptions_a_o, exceptions_b_o);
           end
 
-          CCALL: begin
+          TWO_SOURCE: begin
             // when trying to read this using the Sail definitions, cs is my operand_a and cb is my operand_b
             unique case (ccall_type_i)
-              CCALL_CCALL: begin
-                exceptions_a_o =( exceptions_a[TAG_VIOLATION]            ) << TAG_VIOLATION
-                               |( exceptions_a[SEAL_VIOLATION]           ) << SEAL_VIOLATION
-                               |( a_getType_o != b_getType_o             ) << TYPE_VIOLATION
-                               |( exceptions_a[PERMIT_EXECUTE_VIOLATION] ) << PERMIT_EXECUTE_VIOLATION
-                               |( exceptions_a[LENGTH_VIOLATION]         ) << LENGTH_VIOLATION
-                               |( a_getAddr_o >= a_getTop_o              ) << LENGTH_VIOLATION
-                               |( 1'b1 << CALL_TRAP);
-
-                exceptions_b_o =( exceptions_b[TAG_VIOLATION]         ) << TAG_VIOLATION
-                               |( exceptions_b[SEAL_VIOLATION]        ) << SEAL_VIOLATION
-                               |( b_getPerms_o[`PERMIT_EXECUTE_INDEX] ) << PERMIT_EXECUTE_VIOLATION;
-              end
-
-              CCALL_CRETURN: begin
-                exceptions_a_o = 1'b1 << RETURN_TRAP;
-              end
-
-              CCALL_CCALLFAST_CYCLE1: begin
+              CCALL_CYCLE1: begin
                 a_setAddr_i = {a_getAddr_o[`INTEGER_SIZE-1:1], 1'b0};
 
                 exceptions_a_o =( exceptions_a[TAG_VIOLATION]                                            ) << TAG_VIOLATION
@@ -555,7 +537,7 @@ logic [`CAP_SIZE:0] b_setAddr_o;
                 returnvalue_o = a_setType_o;
               end
 
-              CCALL_CCALLFAST_CYCLE2: begin
+              CCALL_CYCLE2: begin
                 a_setAddr_i = {a_getAddr_o[`INTEGER_SIZE-1:1], 1'b0};
 
                 exceptions_a_o =( exceptions_a[TAG_VIOLATION]                                            ) << TAG_VIOLATION

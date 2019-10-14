@@ -121,7 +121,7 @@ typedef enum logic [6:0] {
   C_TEST_SUBSET       = 7'h20,
   STORE               = 7'h7C,
   LOAD                = 7'h7D,
-  CCALL               = 7'h7E,
+  TWO_SOURCE          = 7'h7E,
   SOURCE_AND_DEST     = 7'h7F
 } cheri_threeop_funct7_e;
 
@@ -177,11 +177,9 @@ typedef enum logic [4:0] {
   ONE_OP        = 5'h1f
 } cheri_s_a_d_funct5_e;
 
-typedef enum logic [1:0] {
-  CCALL_CCALL,
-  CCALL_CRETURN,
-  CCALL_CCALLFAST_CYCLE1,
-  CCALL_CCALLFAST_CYCLE2
+typedef enum logic [0:0] {
+  CCALL_CYCLE1,
+  CCALL_CYCLE2
 } cheri_ccall_e;
 
 //////////////////////

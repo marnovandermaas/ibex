@@ -172,9 +172,9 @@ module ibex_decoder #(
   assign regfile_raddr_b_o = instr[`REG_S2]; // rs2
 
   // destination register
-  // need to check if we're doing a CCALLFAST, since these are the bits that contain the selector
-  assign regfile_waddr_o   = (cheri_ccall_type_o == CCALL_CCALLFAST_CYCLE2) ? 5'd31
-                                                                            : instr[`REG_D]; // rd
+  // need to check if we're doing a CCALL, since these are the bits that contain the selector
+  assign regfile_waddr_o   = (cheri_ccall_type_o == CCALL_CYCLE2) ? 5'd31
+                                                                       : instr[`REG_D]; // rd
 
   ////////////////////
   // Register check //
@@ -231,7 +231,7 @@ module ibex_decoder #(
     cheri_base_opcode_o         = cheri_base_opcode;
     cheri_threeop_opcode_o      = cheri_threeop_opcode;
     cheri_sad_opcode_o          = cheri_sad_opcode;
-    cheri_ccall_type_o          = CCALL_CCALL;
+    cheri_ccall_type_o          = CCALL_CYCLE1;
 
     use_cap_base_o              = 1'b0;
     mem_ddc_relative_o          = 1'b0;
@@ -719,9 +719,9 @@ module ibex_decoder #(
                 cheri_b_en_o         = 1'b1;
               end
 
-              CCALL: begin
+              TWO_SOURCE: begin
                 if (instr[`REG_D] == 5'h01) begin
-                  // CCALLFAST
+                  // CCALL
                   // we do this in two cycles
                   // exception checks are done in both cycles
 
@@ -729,26 +729,18 @@ module ibex_decoder #(
                   if (instr_new_i) begin
                     // in this cycle we jump to the new PC
                     cheri_b_en_o         = 1'b1;
-                    cheri_ccall_type_o   = CCALL_CCALLFAST_CYCLE1;
+                    cheri_ccall_type_o   = CCALL_CYCLE1;
                     cheri_op_b_mux_sel_o = CHERI_OP_B_REG_CAP;
                     jump_set_o           = 1'b1;
                     regfile_we           = 1'b0;
                   end else begin
                     // in this cycle we set the value of register 31
                     cheri_b_en_o         = 1'b1;
-                    cheri_ccall_type_o   = CCALL_CCALLFAST_CYCLE2;
+                    cheri_ccall_type_o   = CCALL_CYCLE2;
                     cheri_op_b_mux_sel_o = CHERI_OP_B_REG_CAP;
                     jump_set_o           = 1'b0;
                     regfile_we           = 1'b1;
                   end
-                end else if (instr[`REG_D] == 5'h1F) begin
-                  // CRETURN
-                  cheri_ccall_type_o = CCALL_CRETURN;
-                end else begin
-                  // CCALL
-                  cheri_ccall_type_o = CCALL_CCALL;
-                  cheri_op_b_mux_sel_o = CHERI_OP_B_REG_CAP;
-                  cheri_b_en_o = 1'b1;
                 end
               end
 
