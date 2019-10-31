@@ -53,7 +53,10 @@ verilator-trace-non:
 verilator-trace:
 	verilator +define+RVFI +define+DII -DTRACE -Wno-WIDTH -Wno-UNOPTFLAT --trace --cc $(FILELIST) --exe $(SIMFILE) $(LIBS) --top-module ibex_core_avalon
 
-compile:
+obj_dir:
+	mkdir -p "$@"
+
+compile: | obj_dir
 	make -j -C obj_dir -f V$(TARGET).mk V$(TARGET) OPT=-DVL_DEBUG CFG_CXXFLAGS_NO_UNUSED="-std=gnu++11 -Wno-sign-compare -Wno-uninitialized -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable -Wno-shadow"
 
 
