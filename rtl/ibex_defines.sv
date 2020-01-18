@@ -339,7 +339,7 @@ typedef enum logic [5:0] {
   EXC_CAUSE_LOAD_ACCESS_FAULT  = 6'h05,
   EXC_CAUSE_STORE_ACCESS_FAULT = 6'h07,
   EXC_CAUSE_ECALL_MMODE        = 6'h0B,
-  EXC_CAUSE_CHERI_EXCEPTION    = 6'h20
+  EXC_CAUSE_CHERI_EXCEPTION    = 6'h1C
 } exc_cause_e;
 
 // CHERI exception cause
