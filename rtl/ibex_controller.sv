@@ -192,7 +192,7 @@ module ibex_controller (
   /////////////////////
   // Core controller //
   /////////////////////
-
+// verilator lint_off LATCH
   always_comb begin
     // Default values
     instr_req_o           = 1'b1;
@@ -538,6 +538,7 @@ module ibex_controller (
       end
     endcase
   end
+// verilator lint_on LATCH
 
   ///////////////////
   // Stall control //
