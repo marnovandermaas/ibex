@@ -153,6 +153,13 @@ extern void serv_socket_init(unsigned long long ptr)
     exit(EXIT_FAILURE);
   }
 
+  // Allow reuse of addresses to avoid "Address already in use" error when binding
+  int val = 1;
+  if(setsockopt(s->sock, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val)) != 0) {
+      perror("setsockopt");
+      exit(EXIT_FAILURE);
+  }
+
   // Bind socket
   s->port = getPortNumber(s->name, s->port);
   struct sockaddr_in sockAddr;
@@ -160,8 +167,10 @@ extern void serv_socket_init(unsigned long long ptr)
   sockAddr.sin_family = AF_INET;
   sockAddr.sin_addr.s_addr = htonl(INADDR_ANY);
   sockAddr.sin_port = htons(s->port);
+
   int ret = bind(s->sock, (struct sockaddr *) &sockAddr, sizeof(sockAddr));
   if (ret == -1) {
+    printf("Bind returned an error exiting with %d.\n", EXIT_FAILURE);
     perror("bind");
     exit(EXIT_FAILURE);
   }
