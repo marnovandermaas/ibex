@@ -1,9 +1,11 @@
 
-LOCALINCLUDES=-I../rtl
+LOCALINCLUDES=-I../rtl \
+			  -I../vendor/lowrisc_ip/ip/prim/rtl \
+			  -I../vendor/lowrisc_ip/dv/sv/dv_utils
 FILELIST=../rtl/avalon/ibex_core_avalon.sv \
 			../examples/sim/rtl/prim_clock_gating.sv \
-			../rtl/ibex_defines.sv \
 			../rtl/avalon/avalon_ibex_translator.sv \
+			../rtl/ibex_pkg.sv \
 			../rtl/ibex_alu.sv \
 			../rtl/ibex_compressed_decoder.sv \
 			../rtl/ibex_controller.sv \
@@ -14,13 +16,12 @@ FILELIST=../rtl/avalon/ibex_core_avalon.sv \
 			../rtl/ibex_fetch_fifo.sv \
 			../rtl/ibex_id_stage.sv \
 			../rtl/ibex_if_stage.sv \
-			../rtl/ibex_int_controller.sv \
 			../rtl/ibex_load_store_unit.sv \
 			../rtl/ibex_multdiv_fast.sv \
 			../rtl/ibex_multdiv_slow.sv \
 			../rtl/ibex_prefetch_buffer.sv \
 			../rtl/ibex_register_file_ff.sv \
-			../rtl/ibex_tracer_defines.sv \
+			../rtl/ibex_tracer_pkg.sv \
 			../rtl/ibex_tracer.sv
 
 TARGET=ibex_core_avalon
@@ -34,10 +35,10 @@ all: verilator compile
 trace: verilator-trace compile
 
 verilator:
-	verilator +define+RVFI +define+DII -Wno-WIDTH -Wno-UNOPTFLAT --cc $(FILELIST) --exe $(SIMFILE) $(LIBS)
+	verilator +define+RVFI +define+DII -Wno-WIDTH -Wno-UNOPTFLAT --cc $(FILELIST) --exe $(SIMFILE) $(LIBS) $(LOCALINCLUDES)
 
 verilator-trace:
-	verilator +define+RVFI +define+DII -DTRACE -Wno-WIDTH -Wno-UNOPTFLAT --trace --cc $(FILELIST) --exe $(SIMFILE) $(LIBS)
+	verilator +define+RVFI +define+DII -DTRACE -Wno-WIDTH -Wno-UNOPTFLAT --trace --cc $(FILELIST) --exe $(SIMFILE) $(LIBS) $(LOCALINCLUDES)
 
 compile:
 	make -j -C obj_dir -f V$(TARGET).mk V$(TARGET) CFG_CXXFLAGS_NO_UNUSED="-std=gnu++11 -Wno-sign-compare -Wno-uninitialized -Wno-unused-but-set-variable -Wno-unused-parameter -Wno-unused-variable -Wno-shadow"
