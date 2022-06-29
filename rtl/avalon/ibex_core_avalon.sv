@@ -19,8 +19,7 @@ module ibex_core_avalon #(
     input  logic        test_en_i,     // enable all clock gates for testing
 
     // Core ID, Cluster ID and boot address are considered more or less static
-    input  logic [ 3:0] core_id_i,
-    input  logic [ 5:0] cluster_id_i,
+    input  logic [31:0] hart_id_i,
     input  logic [31:0] boot_addr_i,
 
     // Instruction memory interface (Avalon)
@@ -42,10 +41,11 @@ module ibex_core_avalon #(
     input  logic [1:0]  avm_main_response,
 
     // Interrupt inputs
-    input  logic        irq_i,                 // level sensitive IR lines
-    input  logic [4:0]  irq_id_i,
-    output logic        irq_ack_o,             // irq ack
-    output logic [4:0]  irq_id_o,
+    input  logic        irq_software_i,
+    input  logic        irq_timer_i,
+    input  logic        irq_external_i,
+    input  logic [14:0] irq_fast_i,
+    input  logic        irq_nm_i,       // non-maskeable interrupt
 
     // Debug Interface
     input  logic        debug_req_i,
@@ -78,19 +78,12 @@ module ibex_core_avalon #(
 `endif
 
 `ifdef DII
-    input logic [31:0]  dii_insn,
-    input logic [15:0]  dii_time,
-    input logic [7:0]   dii_cmd,
-    output logic        dii_ready,
-    input logic         dii_valid,
-`endif
-
-`ifdef DII
     output logic        perf_imiss_o,
 `endif
 
     // CPU Control Signals
-    input  logic        fetch_enable_i
+    input  logic        fetch_enable_i,
+    output logic        core_sleep_o
 );
 
 `ifdef DII
@@ -183,35 +176,34 @@ module ibex_core_avalon #(
         .test_en_i      (test_en_i),
 
         // Configuration
-        .core_id_i      (core_id_i),
-        .cluster_id_i   (cluster_id_i),
+        .hart_id_i      (hart_id_i),
         .boot_addr_i    (boot_addr_i),
 
         // Instruction memory interface
+        .instr_req_o    (instr_req_o),
+        .instr_gnt_i    (instr_gnt_i),
         .instr_rvalid_i (instr_rvalid_i),
         .instr_addr_o   (instr_addr_o),
         .instr_rdata_i  (instr_rdata_i),
-        .instr_req_o    (instr_req_o),
-        .instr_gnt_i    (instr_gnt_i),
-
-
+        .instr_err_i    (instr_err_i),
 
         // Data memory interface
+        .data_req_o     (data_req_o),
+        .data_gnt_i     (data_gnt_i),
         .data_rvalid_i  (data_rvalid_i),
+        .data_we_o      (data_we_o),
         .data_be_o      (data_be_o),
         .data_addr_o    (data_addr_o),
         .data_wdata_o   (data_wdata_o),
         .data_rdata_i   (data_rdata_i),
         .data_err_i     (data_err_i),
-        .data_we_o      (data_we_o),
-        .data_req_o     (data_req_o),
-        .data_gnt_i     (data_gnt_i),
 
         // Interrupt inputs
-        .irq_i          (irq_i),
-        .irq_id_i       (irq_id_i),
-        .irq_ack_o      (irq_ack_o),
-        .irq_id_o       (irq_id_o),
+        .irq_software_i (irq_software_i),
+        .irq_timer_i    (irq_timer_i),
+        .irq_external_i (irq_external_i),
+        .irq_fast_i     (irq_fast_i),
+        .irq_nm_i       (irq_nm_i),
 
         // Debug interface
         .debug_req_i    (debug_req_i),
@@ -248,7 +240,8 @@ module ibex_core_avalon #(
     `endif
 
         // Special control signal
-        .fetch_enable_i (fetch_enable_i)
+        .fetch_enable_i (fetch_enable_i),
+        .core_sleep_o   (core_sleep_o)
     );
 
 endmodule //ibexcore
