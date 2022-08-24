@@ -25,6 +25,7 @@
 //       [3] https://www.xilinx.com/support/documentation/application_notes/xapp052.pdf
 
 `include "prim_assert.sv"
+`include "prim_cipher_pkg.sv"
 
 module prim_lfsr #(
   // Lfsr Type, can be FIB_XNOR or GAL_XOR
