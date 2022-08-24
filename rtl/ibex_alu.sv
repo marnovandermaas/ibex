@@ -118,56 +118,6 @@ module ibex_alu #(
 
   assign adder_result_o     = adder_result;
 
-  ///////////
-  // Shift //
-  ///////////
-
-  logic        shift_left;         // should we shift left
-  logic        shift_arithmetic;
-
-  logic  [4:0] shift_amt;          // amount of shift, to the right
-  logic [31:0] shift_op_a;         // input of the shifter
-  logic [31:0] shift_result;
-  logic [31:0] shift_right_result;
-  logic [31:0] shift_left_result;
-
-  assign shift_amt = operand_b_i[4:0];
-
-  assign shift_left = (operator_i == ALU_SLL);
-
-  assign shift_arithmetic = (operator_i == ALU_SRA);
-
-  // choose the bit reversed or the normal input for shift operand a
-  assign shift_op_a    = shift_left ? operand_a_rev : operand_a_i;
-
-  // right shifts, we let the synthesizer optimize this
-  logic [32:0] shift_op_a_32;
-  assign shift_op_a_32 = {shift_arithmetic & shift_op_a[31], shift_op_a};
-
-  // The MSB of shift_right_result_ext can safely be ignored. We just extend the input to always
-  // do arithmetic shifts.
-  logic signed [32:0] shift_right_result_signed;
-  logic        [32:0] shift_right_result_ext;
-  assign shift_right_result_signed = $signed(shift_op_a_32) >>> shift_amt[4:0];
-  assign shift_right_result_ext    = $unsigned(shift_right_result_signed);
-  assign shift_right_result        = shift_right_result_ext[31:0];
-
-  // bit reverse the shift_right_result for left shifts
-  `ifdef QUARTUS
-    generate
-  `endif
-
-  genvar j;
-  for (j = 0; j < 32; j++) begin : gen_rev_shift_right_result
-    assign shift_left_result[j] = shift_right_result[31-j];
-  end
-
-  `ifdef QUARTUS
-    endgenerate
-  `endif
-
-  assign shift_result = shift_left ? shift_left_result : shift_right_result;
-
   ////////////////
   // Comparison //
   ////////////////
