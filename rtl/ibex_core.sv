@@ -115,6 +115,7 @@ module ibex_core import ibex_pkg::*; #(
   output logic                         rvfi_valid,
   output logic [63:0]                  rvfi_order,
   output logic [31:0]                  rvfi_insn,
+  output logic [31:0]                  rvfi_insn_uncompressed,
   output logic                         rvfi_trap,
   output logic                         rvfi_halt,
   output logic                         rvfi_intr,
@@ -355,6 +356,35 @@ module ibex_core import ibex_pkg::*; #(
 
   // for RVFI
   logic        illegal_insn_id, unused_illegal_insn_id; // ID stage sees an illegal instruction
+
+  // RISC-V Formal Interface signals
+`ifdef RVFI
+  logic [31:0] rvfi_insn_id;
+  logic [4:0]  rvfi_rs1_addr_id;
+  logic [4:0]  rvfi_rs2_addr_id;
+  logic [31:0] rvfi_rs1_data_d;
+  logic [31:0] rvfi_rs1_data_id;
+  logic [31:0] rvfi_rs1_data_q;
+  logic [31:0] rvfi_rs2_data_d;
+  logic [31:0] rvfi_rs2_data_id;
+  logic [31:0] rvfi_rs2_data_q;
+  logic [4:0]  rvfi_rd_addr_id;
+  logic [4:0]  rvfi_rd_addr_q;
+  logic [4:0]  rvfi_rd_addr_d;
+  logic [31:0] rvfi_rd_wdata_id;
+  logic [31:0] rvfi_rd_wdata_d;
+  logic [31:0] rvfi_rd_wdata_q;
+  logic        rvfi_rd_we_id;
+  logic        rvfi_insn_new_d;
+  logic        rvfi_insn_new_q;
+  logic [7:0]  rvfi_mem_mask_int;
+  logic [63:0] rvfi_mem_rdata_d;
+  logic [63:0] rvfi_mem_rdata_q;
+  logic [63:0] rvfi_mem_wdata_d;
+  logic [63:0] rvfi_mem_wdata_q;
+  logic [31:0] rvfi_mem_addr_d;
+  logic [31:0] rvfi_mem_addr_q;
+`endif
 
   logic [31:0] pc_next;
 
@@ -1096,50 +1126,66 @@ module ibex_core import ibex_pkg::*; #(
   end
 
 `ifdef RVFI
-  always_ff @(posedge clk) begin
-    rvfi_halt      <= '0;
-    rvfi_trap      <= lsu_store_err || lsu_load_err;
-    rvfi_intr      <= irq_ack_o;
-    rvfi_order     <= rst_ni ? rvfi_order + rvfi_valid : '0;
-    rvfi_insn      <= rvfi_insn_opcode;
-    rvfi_mode      <= PRIV_LVL_M;
-    rvfi_rs1_addr  <= rvfi_rs1_addr_id;
-    rvfi_rs2_addr  <= rvfi_rs2_addr_id;
-    rvfi_pc_rdata  <= pc_id;
-    rvfi_mem_rmask <= rvfi_mem_mask_int;
-    rvfi_mem_wmask <= data_we_o ? rvfi_mem_mask_int : 4'b0000;
-    rvfi_valid     <= instr_ret;
-    rvfi_rs1_rdata <= rvfi_rs1_data_d;
-    rvfi_rs2_rdata <= rvfi_rs2_data_d;
-    rvfi_pc_wdata  <= (pc_set || lsu_load_err || lsu_store_err) ? (pc_mux_id == 3'b001 ? jump_target_ex : pc_next) : pc_if;
+  always_ff @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      rvfi_halt              <= '0;
+      rvfi_trap              <= '0;
+      rvfi_intr              <= '0;
+      rvfi_order             <= '0;
+      rvfi_insn              <= '0;
+      rvfi_insn_uncompressed <= '0;
+      rvfi_mode              <= '0;
+      rvfi_rs1_addr          <= '0;
+      rvfi_rs2_addr          <= '0;
+      rvfi_pc_rdata          <= '0;
+      rvfi_pc_wdata          <= '0;
+      rvfi_mem_rmask         <= '0;
+      rvfi_mem_wmask         <= '0;
+      rvfi_valid             <= '0;
+      rvfi_rs1_rdata         <= '0;
+      rvfi_rs2_rdata         <= '0;
+      rvfi_rd_wdata          <= '0;
+      rvfi_rd_addr           <= '0;
+      rvfi_mem_rdata         <= '0;
+      rvfi_mem_wdata         <= '0;
+      rvfi_mem_addr          <= '0;
+    end else begin
+      rvfi_halt              <= '0;
+      rvfi_trap              <= lsu_store_err || lsu_load_err;
+      rvfi_intr              <= irq_software_i || irq_timer_i || irq_external_i || irq_fast_i;
+      rvfi_order             <= rvfi_order + rvfi_valid;
+      rvfi_insn              <= rvfi_insn_id;
+      rvfi_insn_uncompressed <= instr_rdata_id;
+      rvfi_mode              <= PRIV_LVL_M; // TODO: Update for user mode support
+      rvfi_rs1_addr          <= rvfi_rs1_addr_id;
+      rvfi_rs2_addr          <= rvfi_rs2_addr_id;
+      rvfi_pc_rdata          <= pc_id;
+      rvfi_pc_wdata          <= (pc_set || lsu_load_err || lsu_store_err) ? (pc_mux_id == 3'b001 ? branch_target_ex : pc_next) : pc_if;
+      rvfi_mem_rmask         <= rvfi_mem_mask_int;
+      rvfi_mem_wmask         <= data_we_o ? rvfi_mem_mask_int : 4'b0000;
+      rvfi_valid             <= perf_instr_ret_wb_spec;
+      rvfi_rs1_rdata         <= rvfi_rs1_data_d;
+      rvfi_rs2_rdata         <= rvfi_rs2_data_d;
+      rvfi_rd_wdata          <= rvfi_rd_wdata_d;
+      rvfi_rd_addr           <= rvfi_rd_addr_d;
+      rvfi_mem_rdata         <= rvfi_mem_rdata_d;
+      rvfi_mem_wdata         <= rvfi_mem_wdata_d;
+      rvfi_mem_addr          <= rvfi_mem_addr_d;
+    end
   end
 
-  assign rvfi_rd_wdata  = rvfi_rd_wdata_q;
-  assign rvfi_rd_addr   = rvfi_rd_addr_q;
-  assign rvfi_mem_rdata = rvfi_mem_rdata_q;
-  assign rvfi_mem_wdata = rvfi_mem_wdata_q;
-  assign rvfi_mem_addr  = rvfi_mem_addr_q;
-
-  // Memory adddress/write data available first cycle of ld/st instruction from register read
+  // Keep the mem data stable for each instruction cycle
   always_comb begin
-    if (instr_first_cycle_id) begin
+    if (rvfi_insn_new_d && lsu_resp_valid) begin
       rvfi_mem_addr_d  = alu_adder_result_ex;
+      rvfi_mem_rdata_d = rf_wdata_lsu;
       rvfi_mem_wdata_d = lsu_wdata;
     end else begin
       rvfi_mem_addr_d  = rvfi_mem_addr_q;
+      rvfi_mem_rdata_d = rvfi_mem_rdata_q;
       rvfi_mem_wdata_d = rvfi_mem_wdata_q;
     end
   end
-
-  // Capture read data from LSU when it becomes valid
-  always_comb begin
-    if (lsu_resp_valid) begin
-      rvfi_mem_rdata_d = rf_wdata_lsu;
-    end else begin
-      rvfi_mem_rdata_d = rvfi_mem_rdata_q;
-    end
-  end
-
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
       rvfi_mem_addr_q  <= '0;
@@ -1169,64 +1215,46 @@ module ibex_core import ibex_pkg::*; #(
     end
   end
 
-  // Source registers 1 and 2 are read in the first instruction cycle
-  // Source register 3 is read in the second instruction cycle.
+  // Source register data are kept stable for each instruction cycle
   always_comb begin
-    if (instr_first_cycle_id) begin
-      rvfi_rs1_data_d = rf_ren_a ? multdiv_operand_a_ex : '0;
-      rvfi_rs1_addr_d = rf_ren_a ? rf_raddr_a : '0;
-      rvfi_rs2_data_d = rf_ren_b ? multdiv_operand_b_ex : '0;
-      rvfi_rs2_addr_d = rf_ren_b ? rf_raddr_b : '0;
-      rvfi_rs3_data_d = '0;
-      rvfi_rs3_addr_d = '0;
+    if (instr_new_id) begin
+      rvfi_rs1_data_d = rvfi_rs1_data_id;
+      rvfi_rs2_data_d = rvfi_rs2_data_id;
     end else begin
       rvfi_rs1_data_d = rvfi_rs1_data_q;
-      rvfi_rs1_addr_d = rvfi_rs1_addr_q;
       rvfi_rs2_data_d = rvfi_rs2_data_q;
-      rvfi_rs2_addr_d = rvfi_rs2_addr_q;
-      rvfi_rs3_data_d = multdiv_operand_a_ex;
-      rvfi_rs3_addr_d = rf_raddr_a;
     end
   end
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
       rvfi_rs1_data_q <= '0;
-      rvfi_rs1_addr_q <= '0;
       rvfi_rs2_data_q <= '0;
-      rvfi_rs2_addr_q <= '0;
-
     end else begin
       rvfi_rs1_data_q <= rvfi_rs1_data_d;
-      rvfi_rs1_addr_q <= rvfi_rs1_addr_d;
       rvfi_rs2_data_q <= rvfi_rs2_data_d;
-      rvfi_rs2_addr_q <= rvfi_rs2_addr_d;
-    end
-  end
-
-  always_comb begin
-    if (rvfi_rd_we_wb) begin
-      // Capture address/data of write to register file
-      rvfi_rd_addr_d = rvfi_rd_addr_wb;
-      // If writing to x0 zero write data as required by RVFI specification
-      if (rvfi_rd_addr_wb == 5'b0) begin
-        rvfi_rd_wdata_d = '0;
-      end else begin
-        rvfi_rd_wdata_d = rvfi_rd_wdata_wb;
-      end
-    end else if (rvfi_instr_new_wb) begin
-      // If no RF write but new instruction in Writeback (when present) or ID/EX (when no writeback
-      // stage present) then zero RF write address/data as required by RVFI specification
-      rvfi_rd_addr_d  = '0;
-      rvfi_rd_wdata_d = '0;
-    end else begin
-      // Otherwise maintain previous value
-      rvfi_rd_addr_d  = rvfi_rd_addr_q;
-      rvfi_rd_wdata_d = rvfi_rd_wdata_q;
     end
   end
 
   // RD write register is refreshed only once per cycle and
   // then it is kept stable for the cycle.
+  always_comb begin
+    if (rvfi_insn_new_d) begin
+      if (!rvfi_rd_we_id) begin
+        rvfi_rd_addr_d    = '0;
+        rvfi_rd_wdata_d   = '0;
+      end else begin
+        rvfi_rd_addr_d = rvfi_rd_addr_id;
+        if (!rvfi_rd_addr_id) begin
+          rvfi_rd_wdata_d = '0;
+        end else begin
+          rvfi_rd_wdata_d = rvfi_rd_wdata_id;
+        end
+      end
+    end else begin
+      rvfi_rd_addr_d    = rvfi_rd_addr_q;
+      rvfi_rd_wdata_d   = rvfi_rd_wdata_q;
+    end
+  end
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
       rvfi_rd_addr_q    <= '0;
@@ -1237,39 +1265,25 @@ module ibex_core import ibex_pkg::*; #(
     end
   end
 
-  // rvfi_intr must be set for first instruction that is part of a trap handler.
-  // On the first cycle of a new instruction see if a trap PC was set by the previous instruction,
-  // otherwise maintain value.
-  assign rvfi_intr_d = instr_first_cycle_id ? rvfi_set_trap_pc_q : rvfi_intr_q;
-
   always_comb begin
-    rvfi_set_trap_pc_d = rvfi_set_trap_pc_q;
-
-    if (pc_set && pc_mux_id == PC_EXC &&
-        (exc_pc_mux_id == EXC_PC_EXC || exc_pc_mux_id == EXC_PC_IRQ)) begin
-      // PC is set to enter a trap handler
-      rvfi_set_trap_pc_d = 1'b1;
-    end else if (rvfi_set_trap_pc_q && rvfi_id_done) begin
-      // first instruction has been executed after PC is set to trap handler
-      rvfi_set_trap_pc_d = 1'b0;
+    if (instr_new_id) begin
+      rvfi_insn_new_d = 1'b1;
+    end else begin
+      rvfi_insn_new_d = rvfi_insn_new_q;
     end
   end
-
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      rvfi_set_trap_pc_q <= 1'b0;
-      rvfi_intr_q        <= 1'b0;
+      rvfi_insn_new_q <= 1'b0;
     end else begin
-      rvfi_set_trap_pc_q <= rvfi_set_trap_pc_d;
-      rvfi_intr_q        <= rvfi_intr_d;
+      if (perf_instr_ret_wb_spec) begin
+        rvfi_insn_new_q <= 1'b0;
+      end else begin
+        rvfi_insn_new_q <= rvfi_insn_new_d;
+      end
     end
   end
 
-`else
-  logic unused_instr_new_id, unused_instr_id_done, unused_instr_done_wb;
-  assign unused_instr_id_done = instr_id_done;
-  assign unused_instr_new_id = instr_new_id;
-  assign unused_instr_done_wb = instr_done_wb;
 `endif
 
   // Certain parameter combinations are not supported

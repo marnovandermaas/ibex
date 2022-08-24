@@ -116,7 +116,7 @@ int main(int argc, char** argv, char** env) {
 
     top->avm_instr_readdatavalid = 0;
     top->avm_instr_waitrequest = 0;
-         
+
     top->rst_i = 0;
 
     int received = 0;

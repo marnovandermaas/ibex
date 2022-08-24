@@ -35,7 +35,7 @@ all: verilator compile
 trace: verilator-trace compile
 
 verilator:
-	verilator +define+RVFI +define+DII -Wno-WIDTH -Wno-UNOPTFLAT --cc $(FILELIST) --exe $(SIMFILE) $(LIBS) $(LOCALINCLUDES)
+	verilator +define+RVFI +define+DII -Wno-WIDTH -Wno-UNOPTFLAT --cc $(FILELIST) --exe $(SIMFILE) $(LIBS) $(LOCALINCLUDES) --top-module ibex_core_avalon
 
 verilator-trace:
 	verilator +define+RVFI +define+DII -DTRACE -Wno-WIDTH -Wno-UNOPTFLAT --trace --cc $(FILELIST) --exe $(SIMFILE) $(LIBS) $(LOCALINCLUDES)

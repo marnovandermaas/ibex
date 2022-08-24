@@ -97,6 +97,7 @@ module ibex_core_avalon #(
     logic [31:0]  instr_rdata_i;
     logic         instr_req_o;
     logic         instr_gnt_i;
+    logic         instr_err_i;
 
     logic         data_rvalid_i;
     logic [3:0]   data_be_o;
@@ -119,7 +120,7 @@ module ibex_core_avalon #(
         // our main memory interface is word-addressed but the ibex core is byte-addressed
         .data_addr_i({2'b0, data_addr_o[31:2]}),
         .data_wdata_i(data_wdata_o),
-        
+
         .avm_main_waitrequest(avm_main_waitrequest),
         .avm_main_readdatavalid(avm_main_readdatavalid),
         .avm_main_readdata(avm_main_readdata),
@@ -160,7 +161,24 @@ module ibex_core_avalon #(
         .avm_instr_address(avm_instr_address)
     );
 
+    ibex_register_file_ff #(
+      .RV32E            (RV32E)
+    ) register_file_i (
+      .clk_i (clk),
+      .rst_ni(rst_ni),
 
+      .test_en_i       (test_en_i),
+      .dummy_instr_id_i(dummy_instr_id),
+
+      .raddr_a_i(rf_raddr_a),
+      .rdata_a_o(rf_rdata_a_ecc),
+      .raddr_b_i(rf_raddr_b),
+      .rdata_b_o(rf_rdata_b_ecc),
+      .waddr_a_i(rf_waddr_wb),
+      .wdata_a_i(rf_wdata_wb_ecc),
+      .we_a_i   (rf_we_wb),
+      .err_o    (rf_alert_major_internal)
+    );
 
     ibex_core #(
         .MHPMCounterNum   (MHPMCounterNum),
@@ -173,7 +191,6 @@ module ibex_core_avalon #(
         // Clock and reset
         .clk_i          (clk_i),
         .rst_ni         (~rst_i),
-        .test_en_i      (test_en_i),
 
         // Configuration
         .hart_id_i      (hart_id_i),
@@ -198,6 +215,27 @@ module ibex_core_avalon #(
         .data_rdata_i   (data_rdata_i),
         .data_err_i     (data_err_i),
 
+        .dummy_instr_id_o (dummy_instr_id),
+        .rf_raddr_a_o     (rf_raddr_a),
+        .rf_raddr_b_o     (rf_raddr_b),
+        .rf_waddr_wb_o    (rf_waddr_wb),
+        .rf_we_wb_o       (rf_we_wb),
+        .rf_wdata_wb_ecc_o(rf_wdata_wb_ecc),
+        .rf_rdata_a_ecc_i (rf_rdata_a_ecc_buf),
+        .rf_rdata_b_ecc_i (rf_rdata_b_ecc_buf),
+
+        .ic_tag_req_o      (ic_tag_req),
+        .ic_tag_write_o    (ic_tag_write),
+        .ic_tag_addr_o     (ic_tag_addr),
+        .ic_tag_wdata_o    (ic_tag_wdata),
+        .ic_tag_rdata_i    (ic_tag_rdata),
+        .ic_data_req_o     (ic_data_req),
+        .ic_data_write_o   (ic_data_write),
+        .ic_data_addr_o    (ic_data_addr),
+        .ic_data_wdata_o   (ic_data_wdata),
+        .ic_data_rdata_i   (ic_data_rdata),
+        .ic_scr_key_valid_i(scramble_key_valid_q),
+
         // Interrupt inputs
         .irq_software_i (irq_software_i),
         .irq_timer_i    (irq_timer_i),
@@ -206,42 +244,51 @@ module ibex_core_avalon #(
         .irq_nm_i       (irq_nm_i),
 
         // Debug interface
-        .debug_req_i    (debug_req_i),
-        
+        .debug_req_i        (debug_req_i),
+        .crash_dump_o       (crash_dump_o),
+        .double_fault_seen_o(double_fault_seen_o),
+
         // RISC-V Formal Interface
         // Does not comply with the coding standards of _i/_o suffixes, but follows
         // the convention of RISC-V Formal Interface Specification.
     `ifdef RVFI
-        .rvfi_valid             (rvfi_valid),
-        .rvfi_order             (rvfi_order),
-        .rvfi_insn              (rvfi_insn),
-        .rvfi_insn_uncompressed (rvfi_insn_uncompressed),
-        .rvfi_trap              (rvfi_trap),
-        .rvfi_halt              (rvfi_halt),
-        .rvfi_intr              (rvfi_intr),
-        .rvfi_mode              (rvfi_mode),
-        .rvfi_rs1_addr          (rvfi_rs1_addr),
-        .rvfi_rs2_addr          (rvfi_rs2_addr),
-        .rvfi_rs1_rdata         (rvfi_rs1_rdata),
-        .rvfi_rs2_rdata         (rvfi_rs2_rdata),
-        .rvfi_rd_addr           (rvfi_rd_addr),
-        .rvfi_rd_wdata          (rvfi_rd_wdata),
-        .rvfi_pc_rdata          (rvfi_pc_rdata),
-        .rvfi_pc_wdata          (rvfi_pc_wdata),
-        .rvfi_mem_addr          (rvfi_mem_addr),
-        .rvfi_mem_rmask         (rvfi_mem_rmask),
-        .rvfi_mem_wmask         (rvfi_mem_wmask),
-        .rvfi_mem_rdata         (rvfi_mem_rdata),
-        .rvfi_mem_wdata         (rvfi_mem_wdata),
-    `endif
-
-    `ifdef DII
-        .perf_imiss_o   (perf_imiss),
+        .rvfi_valid,
+        .rvfi_order,
+        .rvfi_insn,
+        .rvfi_insn_uncompressed,
+        .rvfi_trap,
+        .rvfi_halt,
+        .rvfi_intr,
+        .rvfi_mode,
+        .rvfi_ixl,
+        .rvfi_rs1_addr,
+        .rvfi_rs2_addr,
+        .rvfi_rs3_addr,
+        .rvfi_rs1_rdata,
+        .rvfi_rs2_rdata,
+        .rvfi_rs3_rdata,
+        .rvfi_rd_addr
+        .rvfi_rd_wdata,
+        .rvfi_pc_rdata,
+        .rvfi_pc_wdata,
+        .rvfi_mem_addr,
+        .rvfi_mem_rmask,
+        .rvfi_mem_wmask,
+        .rvfi_mem_rdata,
+        .rvfi_mem_wdata,
+        .rvfi_ext_mip,
+        .rvfi_ext_nmi,
+        .rvfi_ext_debug_req,
+        .rvfi_ext_mcycle,
     `endif
 
         // Special control signal
-        .fetch_enable_i (fetch_enable_i),
-        .core_sleep_o   (core_sleep_o)
+        .fetch_enable_i        (fetch_enable_i),
+        .alert_minor_o         (core_alert_minor),
+        .alert_major_internal_o(core_alert_major_internal),
+        .alert_major_bus_o     (core_alert_major_bus),
+        .icache_inval_o        (icache_inval),
+        .core_busy_o           (core_busy_d)
     );
 
 endmodule //ibexcore
