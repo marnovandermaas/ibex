@@ -141,10 +141,6 @@ module ibex_core import ibex_pkg::*; #(
   output logic [63:0]                  rvfi_ext_mcycle,
 `endif
 
-`ifdef DII
-    output logic        perf_imiss_o,
-`endif
-
   // CPU Control Signals
   // SEC_CM: FETCH.CTRL.LC_GATED
   input  fetch_enable_t                fetch_enable_i,
@@ -360,10 +356,6 @@ module ibex_core import ibex_pkg::*; #(
   // for RVFI
   logic        illegal_insn_id, unused_illegal_insn_id; // ID stage sees an illegal instruction
 
-`ifdef DII
-  assign perf_imiss_o = perf_imiss;
-`endif
-
   logic [31:0] pc_next;
 
   //////////////////////
@@ -469,8 +461,7 @@ module ibex_core import ibex_pkg::*; #(
 
     .pc_mismatch_alert_o(pc_mismatch_alert),
     .pc_next            (pc_next),
-    .if_busy_o          (if_busy),
-    .perf_imiss_o       (perf_imiss)
+    .if_busy_o          (if_busy)
   );
 
   // Core is waiting for the ISide when ID/EX stage is ready for a new instruction but none are
