@@ -747,10 +747,11 @@
   iterations: 20
   gen_test: riscv_rand_instr_test
   gen_opts: >
-    +instr_cnt=6000
+    +instr_cnt=1000
+    +num_of_sub_program=0
     +pmp_max_offset=00024000
     +pmp_randomize=1
-    +pmp_allow_addr_overlap=1
+    +pmp_allow_illegal_tor=1
   rtl_test: core_ibex_base_test
   rtl_params:
     PMPEnable: 1
