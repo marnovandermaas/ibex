@@ -217,12 +217,16 @@ lemma ibex
 
   MemOpRequiresValid: have (`LSU.ls_fsm_cs != `LSU.IDLE || `CR.lsu_req |-> `ID.instr_valid_i)
 
+  # When there is an instruction is finished in EX but is blocked from moving to WB then there must be a valid instruction in the WB stage. This is a helper property for DivInstrStable
+  InstrInWbStage: have (wbexc_exists & ~wbexc_finishing -> `WBG.wb_valid_q)
+
+  # When an instruction progresses from the execute to the writeback stage the multiplier must be in its idle state (ALBL). This is true whether the progressing instruction is a multiplication or not. This property helps prove DivInstrNotMult.
   MultEndState: have (instr_will_progress |=> `MULTG.mult_state_q == `MULTG.ALBL)
+
+  /
 
   # Assert that only when multiplying the mult_state_q leaves ALBL mode. This assertion helps remove some state space for DivInstrStable.
   DivInstrNotMult: have (~`MULT.mult_en_internal |-> `MULTG.mult_state_q == `MULTG.ALBL)
-  # When there is an instruction is finished in EX but is blocked from moving to WB then there must be a valid instruction in the WB stage. This is a helper property for DivInstrStable
-  InstrInWbStage: have (wbexc_exists & ~wbexc_finishing -> `WBG.wb_valid_q)
 
   /
 
