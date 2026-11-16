@@ -1,0 +1,21 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# The RTL harness (3) as SMT-LIB2 for yosys-smtbmc, see README.md (make rtl).
+read_slang --top rtl_md_check -DSYNTHESIS -DYOSYS -DMULDIV_SMTBMC \
+  -I ../../../vendor/lowrisc_ip/ip/prim/rtl \
+  ../../../rtl/ibex_pkg.sv ../../../rtl/ibex_alu.sv ../../../rtl/ibex_multdiv_slow.sv \
+  ../../../rtl/ibex_multdiv_fast.sv ../../../rtl/ibex_ex_block.sv \
+  md_ref.sv rtl_md_check.sv --no-proc
+proc
+flatten
+select -assert-count 3 t:$mul
+cutpoint t:$mul
+opt_clean
+setundef -undriven -anyseq
+opt -full
+async2sync
+dffunmap
+opt_clean
+write_smt2 -wires ../build/muldiv/rtl_md_check.smt2

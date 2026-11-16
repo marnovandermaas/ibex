@@ -54,10 +54,11 @@ lemma riscv
     /
     use spec_compliant_no_err
 
-  # Never actually proved, just assumed to be true instead.
-  MType:
-  in Mul:(`IS_MUL) MulH:(`IS_MULH) MulHSH:(`IS_MULHSH) MulHU:(`IS_MULHU) Div:(`IS_DIV) DivU:(`IS_DIVU) Rem:(`IS_REM) RemU:(`IS_REMU)
-    use spec_compliant_no_err
+  MType: block
+    lemma muldiv
+    /
+    in Mul:(`IS_MUL) MulH:(`IS_MULH) MulHSH:(`IS_MULHSH) MulHU:(`IS_MULHU) Div:(`IS_DIV) DivU:(`IS_DIVU) Rem:(`IS_REM) RemU:(`IS_REMU)
+      use spec_compliant_no_err
 
   CSR:
   in (`IS_CSR & wbexc_is_checkable_csr)

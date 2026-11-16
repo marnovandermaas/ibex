@@ -71,6 +71,7 @@
 `define IS_DIVU `IS_MTYPE(3'b101)
 `define IS_REM `IS_MTYPE(3'b110)
 `define IS_REMU `IS_MTYPE(3'b111)
+`define IS_MTYPE_ANY (`INSTR[6:0] == 7'b0110011 && `INSTR[31:25] == 7'b0000001)
 
 `define IS_CSR (`INSTR[6:0] == 7'b1110011 && (|`INSTR[13:12]))
 `define CSR_ADDR (`INSTR[31:20])

@@ -1,0 +1,22 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Sail spec check (1) for MUL, MULH, MULHSU, MULHU, see README.md. LOWRISC_SAIL_SRC and FUNCT3_VAL are
+# substituted by the Makefile.
+read_slang --top spec_md_check -G FUNCT3=FUNCT3_VAL -DSYNTHESIS -DYOSYS ../build/ibexspec.sv ../spec/stub.sv ../spec/spec_api.sv md_ref.sv spec_md_check.sv -I LOWRISC_SAIL_SRC/lib/sv/ --single-unit --no-proc
+proc
+flatten
+delete */t:$print
+opt_clean
+setundef -undriven -anyseq
+memory_map
+opt -full
+wreduce
+opt_clean
+techmap
+opt -fast
+aigmap
+opt_clean
+stat
+write_aiger -zinit ../build/muldiv/spec_md_check_fFUNCT3_VAL.aig

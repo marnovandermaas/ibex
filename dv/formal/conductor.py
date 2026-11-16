@@ -23,14 +23,9 @@ from pathlib import Path
 
 # Skipped properties are excluded from every step
 SKIPPED_PROPS = [
-    'MType_Div_Data',
-    'MType_Rem_Data',
-    'MType_Mul_Data',
-    'MType_RemU_Data',
-    'MType_MulH_Data',
-    'MType_DivU_Data',
-    'MType_MulHU_Data',
-    'MType_MulHSH_Data',
+    # The RV32M arithmetic, proven separately in muldiv/
+    'MulDivResult',
+    'SpecMulDiv',
 ]
 
 # --------------------- Utilities ----------------------
@@ -74,7 +69,7 @@ async def race[A](tasks: Iterable[typing.Awaitable[A | None]]) -> A | None:
     try:
         async with asyncio.TaskGroup() as tg:
             for task in tasks:
-                async def wrapper():
+                async def wrapper(task=task):
                     res = await task
                     if res is not None:
                         raise RaceWonException(res)

@@ -252,6 +252,8 @@
         ] ++ (with pkgs; [
           gnumake
           patch
+          z3
+          bitwuzla
         ]);
 
         ################

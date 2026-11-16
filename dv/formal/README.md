@@ -88,7 +88,7 @@ Local versions of the external dependencies can be modified and linked into the 
     - Update `LOWRISC_YOSYS_SLANG` to point to the source root with `export LOWRISC_YOSYS_SLANG=<yosys-slang-dir>`.
 
 ## Conclusivity
-All properties are currently known to be conclusive, with the exception of M-Types.
+All properties are currently known to be conclusive.
 The later stages (Memory, Top, RegMatch and Wrap and some Liveness) generally take longer.
 
 This means that (up to base case) Ibex is trace equivalent to the Sail (i.e. where the Sail main function is run in a loop).
@@ -138,6 +138,13 @@ Wrap is the goal.
 Top is the statement: 'every instruction is correct', and RegMatch is to help Wrap with the otherwise difficult RegA and RegB properties.
 
 The other helpers are in `btype.proof` and `mem.proof`, which mostly just contain more graph inductions for properties that can otherwise be difficult to prove.
+
+### RV32M
+SAT-based engines cannot prove a 32-bit multiplier or divider equivalent to a structurally different one in a reasonable amount of time.
+The multiply and divide are [proven separately](muldiv/README.md).
+This separate proof is linked to the main proof as two assumptions in `check/muldiv.sv` from step 14 onwards:
+- `MulDivResult`: the execute stage produces `md_spec_ref(funct3, op_a, op_b)` as long as it is driven like the ID stage drives it.
+- `SpecMulDiv`: the Sail specification computes the same value.
 
 ### Liveness
 The final property of `Wrap` is `Live`, which essentially proves that there will be infinite points of comparison between Ibex and the spec.
@@ -191,9 +198,9 @@ That said it might be more convenient to check a lower level property.
 The precise configuration of Ibex can be found in `top.sv`, but is mostly the default with the following exceptions:
 - 4 PMP Regions, enabled
 - `BranchTargetALU = 1`
+- `RV32M = RV32MSingleCycle`
 - `ResetAll = 1` (but `SecureIbex = 0`)
 In particular, this means we have
-- `RV32MFast`
 - `RV32BNone` (Hence we are missing some instructions.
   This might be a good place for future work, it should be not terribly difficult to extend this)
 - `RegFileFF`

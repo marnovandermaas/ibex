@@ -32,7 +32,7 @@ It has the same ports as the ibex top.
 `define IF `CR.if_stage_i
 `define IFP `IF.gen_prefetch_buffer.prefetch_buffer_i
 `define MULT `CR.ex_block_i.gen_multdiv_fast.multdiv_i
-`define MULTG `MULT.gen_mult_fast
+`define MULTG `MULT.gen_mult_single_cycle
 
 module top import ibex_pkg::*; #(
   parameter int unsigned DmHaltAddr       = 32'h1A110800,
@@ -177,6 +177,7 @@ ibex_top #(
     .RV32E(RV32E),
     .RV32ZC(RV32ZC),
     .BranchTargetALU(1'b1),
+    .RV32M(ibex_pkg::RV32MSingleCycle),
     .PMPEnable(1'b1),
     .PMPNumRegions(PMPNumRegions),
     .CsrMvendorId (CSR_MVENDORID_VALUE),
@@ -558,6 +559,7 @@ mem_assume_t data_mem_assume(
 `include "peek/mem.sv" // Memory tracking
 `include "peek/follower.sv" // Pipeline follower
 `include "spec_instance.sv" // Instantiate the specification
+`include "muldiv.sv" // Multiply and divide
 
 ////////////////////// Proof helpers ///////////////////////
 `include "peek/compare_helper.sv"

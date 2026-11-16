@@ -1,0 +1,70 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+
+lemma muldiv
+  # Environment conditions of muldiv/rtl_md_check.sv, see check/muldiv.sv.
+  EnvSel: have (md_env_sel)
+  EnvEn: have (md_env_en)
+  EnvDecode: have (md_env_decode)
+  EnvAluop: have (md_env_aluop)
+  EnvDit: have (md_env_dit)
+
+  # The copy of the intermediate value register in muldiv/rtl_md_check.sv matches the ID stage.
+  ImdVal: each i 0:(0) 1:(1)
+    have ($past(rst_ni) |-> `ID.imd_val_q[i] ==
+                            $past(`CR.imd_val_we_ex[i] ? `CR.imd_val_d_ex[i] : `ID.imd_val_q[i]))
+
+  # MULH, MULHSU and MULHU spend two cycles in EX, the instruction stays in place meanwhile.
+  # (DivInstrStable in ibex.proof does the same for the divider.)
+  MulInstrStable: have (`MULTG.mult_state_q == `MULTG.MULH |->
+                        $stable(`CR.instr_rdata_id) && `CR.instr_valid_id &&
+                        (~wbexc_exists | wbexc_finishing))
+
+  /
+
+  OperandsStable: have (md_busy |-> $stable(`CR.multdiv_operand_a_ex) &&
+                                    $stable(`CR.multdiv_operand_b_ex) &&
+                                    $stable(`CR.instr_rdata_alu_id) && md_sel)
+
+  /
+
+  EnvStable: have (md_env_stable)
+
+  /
+
+  EnvOk: have (md_env_ok)
+
+  /
+
+  EnvHeld: have (md_env_held_q)
+
+  /
+
+  # An RV32M instruction in ID/EX is a 32-bit instruction, and the spec is executing it.
+  Encoding: have (`ID.instr_valid_i & ex_is_mtype |->
+                  md_spec_insn == `CR.instr_rdata_id && md_spec_insn == `CR.instr_rdata_alu_id &&
+                  md_spec_is_mtype && ~`CR.illegal_insn_id && md_sel)
+  MainMode: have (`ID.instr_valid_i & ex_is_mtype & ~`ID.instr_fetch_err_i |-> main_mode == MAIN_IDEX)
+
+  # The operands the EX block sees are the register values the spec sees.
+  Operands: have (`ID.instr_valid_i & ex_is_mtype & ~`ID.instr_fetch_err_i & ~ex_kill |->
+                  md_spec_rs1 == `CR.multdiv_operand_a_ex &&
+                  md_spec_rs2 == `CR.multdiv_operand_b_ex)
+
+  # Leaving EX means completing in the EX block.
+  Completes: have (instr_will_progress & ex_is_mtype & ~`ID.instr_fetch_err_i & ~ex_err |->
+                   md_completes)
+
+  /
+
+  # Hence (MulDivResult, SpecMulDiv) the result matches the spec when it leaves EX ...
+  ExData: have (instr_will_progress & ex_is_mtype & ~`ID.instr_fetch_err_i & ~ex_err |->
+                spec_post_wX_en && spec_post_wX_addr == `CR.instr_rdata_id[11:7] &&
+                spec_post_wX == `CR.result_ex)
+
+  /
+
+  # ... and it is what the WB stage holds afterwards.
+  WbData: have (wbexc_exists & ~wbexc_err & ~wbexc_fetch_err & `IS_MTYPE_ANY |->
+                `WBG.rf_wdata_wb_q == wbexc_post_wX)

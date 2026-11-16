@@ -106,7 +106,7 @@ lemma ibex
   /
 
   LsuWeq_Wb: have (outstanding_mem |-> wbexc_is_store_instr == `LSU.data_we_q)
-  MultDivStates: have ((~`MULT.mult_en_i -> `MULTG.mult_state_q == `MULTG.ALBL) && (~`MULT.div_en_i -> `MULT.md_state_q == `MULT.MD_IDLE))
+  MultDivStates: have ((~`MULT.mult_en_i -> `MULTG.mult_state_q == `MULTG.MULL) && (~`MULT.div_en_i -> `MULT.md_state_q == `MULT.MD_IDLE))
   LSUEnd: have (`LSU.lsu_req_done_o |-> instr_will_progress)
 
   SpecPastReg: have (wbexc_exists & wbexc_post_wX_en |-> spec_past_regs[wbexc_post_wX_addr] == wbexc_post_wX)
@@ -219,10 +219,10 @@ lemma ibex
 
   MemOpRequiresValid: have (`LSU.ls_fsm_cs != IDLE || `CR.lsu_req |-> `ID.instr_valid_i)
 
-  MultEndState: have (instr_will_progress |=> `MULTG.mult_state_q == `MULTG.ALBL)
+  MultEndState: have (instr_will_progress |=> `MULTG.mult_state_q == `MULTG.MULL)
 
-  # Assert that only when multiplying the mult_state_q leaves ALBL mode. This assertion helps remove some state space for DivInstrStable.
-  DivInstrNotMult: have (~`MULT.mult_en_internal |-> `MULTG.mult_state_q == `MULTG.ALBL)
+  # Assert that only when multiplying the mult_state_q leaves MULL (idle) mode. This assertion helps remove some state space for DivInstrStable.
+  DivInstrNotMult: have (~`MULT.mult_en_internal |-> `MULTG.mult_state_q == `MULTG.MULL)
   # When there is an instruction is finished in EX but is blocked from moving to WB then there must be a valid instruction in the WB stage. This is a helper property for DivInstrStable
   InstrInWbStage: have (wbexc_exists & ~wbexc_finishing -> `WBG.wb_valid_q)
 
@@ -268,7 +268,7 @@ lemma ibex
   FirstCycleNoGnt: have (`ID.instr_first_cycle |-> ~mem_gnt_fst_q)
   MemStartFirstCycle: have (`LSU.ls_fsm_cs == IDLE && `CR.lsu_req |-> `ID.instr_first_cycle)
 
-  DivInstrStable: have (`MULT.md_state_q != `MULT.MD_IDLE |-> $stable(`CR.instr_rdata_id) && `CR.instr_valid_id && (~`ID.stall_multdiv -> `MULT.md_state_q == `MULT.MD_FINISH) && `MULTG.mult_state_q == `MULTG.ALBL && `MULT.div_en_internal && (~wbexc_exists | wbexc_finishing))
+  DivInstrStable: have (`MULT.md_state_q != `MULT.MD_IDLE |-> $stable(`CR.instr_rdata_id) && `CR.instr_valid_id && (~`ID.stall_multdiv -> `MULT.md_state_q == `MULT.MD_FINISH) && `MULTG.mult_state_q == `MULTG.MULL && `MULT.div_en_internal && (~wbexc_exists | wbexc_finishing))
 
   InstrReqCount: have (
     (instr_mem_assume.outstanding_reqs_q == 2) == (`IFP.rdata_outstanding_q[1] && `IFP.rdata_outstanding_q[0]) &&

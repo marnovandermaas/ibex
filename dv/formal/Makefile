@@ -12,7 +12,7 @@ SAIL_RISCV_MODEL_DIR=${LOWRISC_SAIL_RISCV_SRC}/model
 
 include sail-sources.mk
 
-PSGEN_SRCS=thm/btype.proof thm/ibex.proof thm/mem.proof thm/riscv.proof
+PSGEN_SRCS=thm/btype.proof thm/ibex.proof thm/mem.proof thm/muldiv.proof thm/riscv.proof
 PSGEN_FLAGS=-root riscv -task
 
 SAIL_EXTRA_SRCS=spec/main.sail
@@ -76,6 +76,11 @@ build/aig-manip: aig-manip/src/main.rs
 	mkdir -p build
 	cd aig-manip && cargo build --release
 	cp aig-manip/target/release/aig-manip build/
+
+# Just run the multiply and divide proofs
+.PHONY: muldiv
+muldiv: build/ibexspec.sv
+	$(MAKE) -C muldiv all
 
 # Run the jasper environment in interactive mode
 .PHONY: jg
